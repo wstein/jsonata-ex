@@ -1,0 +1,12 @@
+[
+    {
+        "expr": "a",
+        "data": { "a": 1 },
+        "result": 1
+    },
+    {
+        "expr": "b",
+        "data": { "b": 2 },
+        "result": 2
+    }
+]

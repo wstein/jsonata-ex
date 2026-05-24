@@ -1,0 +1,5 @@
+{
+    "expr": "$encodeUrl('\uD800')",
+    "data": null,
+    "result": 1
+}
