@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 A native Elixir port of [JSONata](https://jsonata.org/) v2.2.1, validated against
-the upstream language-agnostic conformance suite (~71% of specified cases pass).
+the upstream language-agnostic conformance suite (~75% of specified cases pass).
 
 ### Added
 
@@ -26,6 +26,11 @@ the upstream language-agnostic conformance suite (~71% of specified cases pass).
   positional tuple-stream operators focus `@` / index `#` (joins).
 - **Date/time** — `$fromMillis`/`$toMillis` (ISO 8601), `$now`/`$millis`, and
   `$formatBase`.
+- **Picture strings** — `$formatInteger` (`Jsonata.Format`): decimal patterns
+  with regular and irregular grouping separators, the `;o` ordinal modifier,
+  Roman numerals (`i`/`I`), letter sequences (`a`/`A`), and spelled-out words
+  (`w`/`W`/`Ww`). Non-ASCII digit groups and numbers ≥ 10⁴⁶ as words are not yet
+  supported.
 - **Host integration** — `$eval`, and registering Elixir functions as callable
   `$fn` via `Jsonata.evaluate/3` bindings.
 - **Tooling** — `credo --strict`, `dialyzer` (clean), 90%+ test coverage, and

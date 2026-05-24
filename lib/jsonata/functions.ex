@@ -78,7 +78,9 @@ defmodule Jsonata.Functions do
       {"power", "<n-n:n>", &power/1},
       {"sqrt", "<n-:n>", &sqrt/1},
       {"formatBase", "<n-n?:s>", &format_base/1},
-      # --- date/time (Phase 5; picture strings deferred) ---
+      {"formatInteger", "<n-s:s>",
+       fn [value, picture] -> Jsonata.Format.format_integer(value, picture) end},
+      # --- date/time (Phase 5; date/time picture strings deferred) ---
       {"fromMillis", "<n-s?s?:s>", &Jsonata.DateTime.from_millis/1},
       {"toMillis", "<s-s?:n>", &Jsonata.DateTime.to_millis/1},
       {"now", "<s?s?:s>", &Jsonata.DateTime.now/1},

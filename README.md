@@ -3,7 +3,7 @@
 A native Elixir port of [JSONata](https://jsonata.org/), the JSON query and
 transformation language. This is a clean-room reimplementation tracking the
 reference implementation [`jsonata-js`](https://github.com/jsonata-js/jsonata)
-v2.2.1, validated against its language-agnostic conformance suite (~71% of
+v2.2.1, validated against its language-agnostic conformance suite (~75% of
 specified cases pass; see the gaps below).
 
 ## Usage
@@ -37,11 +37,14 @@ array/object constructors, wildcards/descendants; ~50 built-in functions with
 signature validation; lambdas with closures and self-recursion; higher-order
 functions; regex matchers; order-by `^`, group-by `{`, and the positional
 tuple-stream operators focus `@` / index `#` (joins); `$eval` and host functions.
+`$formatInteger` integer picture strings (decimal/grouping, `;o` ordinals,
+Roman numerals, letter sequences, and spelled-out words).
 
 ## Not yet implemented
 
-- Date/time and numeric **picture strings** (`$formatNumber`, `$formatInteger`,
-  `$parseInteger`, picture-string `$fromMillis`/`$toMillis`).
+- Date/time and numeric **picture strings** (`$formatNumber`, `$parseInteger`,
+  picture-string `$fromMillis`/`$toMillis`). `$formatInteger` is done except for
+  non-ASCII digit groups and numbers ≥ 10⁴⁶ spelled out as words.
 - The **parent operator** `%`, the **transform** `|…|` operator, and
   order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 
