@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 A native Elixir port of [JSONata](https://jsonata.org/) v2.2.1, validated against
-the upstream language-agnostic conformance suite (~87% of specified cases pass).
+the upstream language-agnostic conformance suite (~92% of specified cases pass).
 
 ### Added
 
@@ -25,11 +25,12 @@ the upstream language-agnostic conformance suite (~87% of specified cases pass).
   `$contains`/`$split`/`$replace`), order-by `^`, group-by `{`, and the
   positional tuple-stream operators focus `@` / index `#` (joins).
 - **Date/time** — `$fromMillis`/`$toMillis` (ISO 8601), `$now`/`$millis`, and
-  `$formatBase`. Date/time picture-string *formatting* (`$fromMillis`/`$now`,
-  `Jsonata.DateTimePicture`): the `[Y0001]-[M01]-[D01]` component grammar with
-  presentation/width modifiers, month/day names, ordinals, day-of-year, ISO week
-  numbers, am/pm, and timezone offsets. Picture-string *parsing* (`$toMillis`
-  with a picture) is not yet implemented.
+  `$formatBase`. Date/time picture-string formatting **and parsing**
+  (`$fromMillis`/`$now`/`$toMillis`, `Jsonata.DateTimePicture`): the
+  `[Y0001]-[M01]-[D01]` component grammar with presentation/width modifiers,
+  month/day names, ordinals, spelled-out words, day-of-year, ISO week numbers,
+  am/pm, and timezone offsets. `$toMillis` also accepts partial ISO 8601 forms
+  (date-only, year-only).
 - **Picture strings** — `$formatInteger` and `$parseInteger` (`Jsonata.Format`):
   decimal patterns with regular and irregular grouping separators, the `;o`
   ordinal modifier, Roman numerals (`i`/`I`), letter sequences (`a`/`A`), and
@@ -50,7 +51,6 @@ the upstream language-agnostic conformance suite (~87% of specified cases pass).
 
 ### Not yet implemented
 
-- Date/time picture-string **parsing** (`$toMillis` with a picture).
 - The **parent operator** `%`, the **transform** `|…|` operator, and
   order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 - JavaScript-style **async** functions (out of scope for the synchronous engine).

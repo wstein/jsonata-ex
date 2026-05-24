@@ -1,7 +1,8 @@
 defmodule Jsonata.DateTimePicture do
   @moduledoc """
-  XPath F&O date/time **picture strings** (`fn:format-dateTime`), ported from
-  `datetime.js`. Drives the picture-string forms of `$fromMillis`/`$toMillis`.
+  XPath F&O date/time **picture strings** (`fn:format-dateTime` and
+  `fn:parse-dateTime`), ported from `datetime.js`. Drives the picture-string
+  forms of `$fromMillis`/`$now` (`format/3`) and `$toMillis` (`parse/3`).
 
   A picture is a sequence of literal text and `[component]` markers (e.g.
   `[Y0001]-[M01]-[D01]`). Each marker names a component (`Y` year, `M` month,
@@ -10,6 +11,8 @@ defmodule Jsonata.DateTimePicture do
   `f` fractional second, `Z`/`z` timezone) with optional presentation and width
   modifiers. Integer components reuse `Jsonata.Format`'s picture machinery.
   """
+
+  import Bitwise
 
   alias Jsonata.{Error, Format}
 
@@ -128,7 +131,28 @@ defmodule Jsonata.DateTimePicture do
   end
 
   defp reduce_token({:literal, value}, acc), do: [{:literal, value} | acc]
-  defp reduce_token({:marker, marker}, acc), do: [analyse_marker(marker, acc) | acc]
+
+  defp reduce_token({:marker, marker}, acc) do
+    part = analyse_marker(marker, acc)
+    [part | fix_previous_parse_width(part, acc)]
+  end
+
+  # An integer component adjacent to a preceding integer part (no literal between)
+  # forces that part to a fixed parse width, so the digit runs don't merge.
+  defp fix_previous_parse_width(part, [%{integer_format: prev} = previous | rest]) do
+    if integer_component?(part) do
+      [%{previous | integer_format: Map.put(prev, :parse_width, prev[:mandatory_digits])} | rest]
+    else
+      [previous | rest]
+    end
+  end
+
+  defp fix_previous_parse_width(_part, acc), do: acc
+
+  defp integer_component?(%{integer_format: _, component: component}),
+    do: :binary.first(component) in @integer_components
+
+  defp integer_component?(_part), do: false
 
   defp analyse_marker(marker, previous_parts) do
     component = String.first(marker)
@@ -438,6 +462,229 @@ defmodule Jsonata.DateTimePicture do
 
       digits ->
         raise Error.new("D3134", value: digits)
+    end
+  end
+
+  # --- parsing ($toMillis with a picture) -----------------------------------
+
+  # date/time component combinations, as bit masks over Y X M x W w d D / P H h m s f
+  @date_a 161
+  @date_b 130
+  @date_c 84
+  @date_d 72
+  @time_a 23
+  @time_b 47
+
+  @doc """
+  Parses `timestamp` per `picture` into epoch milliseconds, defaulting the most
+  significant unspecified components from `now_millis`. Returns `:undefined` if
+  the string does not match the picture.
+  """
+  @spec parse(String.t(), String.t(), integer()) :: integer() | :undefined
+  def parse(timestamp, picture, now_millis) do
+    matchers = picture |> analyse_picture() |> Enum.map(&matcher_for/1)
+
+    regex =
+      Regex.compile!("^" <> Enum.map_join(matchers, &"(#{elem(&1, 0)})") <> "$", [:caseless])
+
+    case Regex.run(regex, timestamp) do
+      nil -> :undefined
+      [_whole | captures] -> resolve(extract(captures, matchers), now_millis)
+    end
+  end
+
+  defp extract(captures, matchers) do
+    captures
+    |> Enum.zip(matchers)
+    |> Enum.reduce(%{}, fn
+      {capture, {_regex, parse_fn, component}}, acc when is_function(parse_fn) ->
+        Map.put(acc, component, parse_fn.(capture))
+
+      _literal, acc ->
+        acc
+    end)
+  end
+
+  # --- per-part regex + capture parser --------------------------------------
+
+  defp matcher_for({:literal, value}), do: {Regex.escape(value), nil, nil}
+
+  defp matcher_for(%{component: "f"} = marker),
+    do: {"[0-9]+", &parse_fractional/1, marker.component}
+
+  defp matcher_for(%{component: component} = marker) when component in ["Z", "z"],
+    do: timezone_matcher(marker)
+
+  defp matcher_for(%{names: names} = marker) when not is_nil(names),
+    do: {"[a-zA-Z]+", name_parser(marker), marker.component}
+
+  defp matcher_for(%{integer_format: format} = marker),
+    do: {integer_regex(format), &Format.parse_spec(&1, format), marker.component}
+
+  defp parse_fractional(value) do
+    {fraction, _} = Float.parse("0." <> String.slice(value, 0, 3))
+    round(fraction * 1000)
+  end
+
+  defp integer_regex(%{primary: :decimal} = format) do
+    width = if format[:parse_width], do: "{#{format.parse_width}}", else: "+"
+    ordinal = if format.ordinal, do: "(?:th|st|nd|rd)", else: ""
+    "[0-9]" <> width <> ordinal
+  end
+
+  defp integer_regex(%{primary: :letters, case: :upper}), do: "[A-Z]+"
+  defp integer_regex(%{primary: :letters}), do: "[a-z]+"
+  defp integer_regex(%{primary: :roman, case: :upper}), do: "[MDCLXVI]+"
+  defp integer_regex(%{primary: :roman}), do: "[mdclxvi]+"
+
+  defp integer_regex(%{primary: :words}) do
+    # match only sequences of recognised number words, "and", and separators
+    # (longest-first to steer the alternation, e.g. "seventeen" before "seven")
+    words =
+      Format.word_keys()
+      |> Enum.sort_by(&(-String.length(&1)))
+      |> Enum.map(&Regex.escape/1)
+
+    "(?:" <> Enum.join(words ++ ["and", "[\\-, ]"], "|") <> ")+"
+  end
+
+  defp name_parser(%{component: component, width: width}) do
+    lookup = name_lookup(component, width)
+    fn value -> Map.get(lookup, value) end
+  end
+
+  defp name_lookup(component, width) when component in ["M", "x"],
+    do: indexed_lookup(@months, 1, width)
+
+  defp name_lookup("F", width), do: indexed_lookup(@days, 1, width)
+  defp name_lookup("P", _width), do: %{"am" => 0, "AM" => 0, "pm" => 1, "PM" => 1}
+
+  defp indexed_lookup(names, base, width) do
+    names
+    |> Enum.with_index(base)
+    |> Map.new(fn {name, index} -> {truncate(name, width), index} end)
+  end
+
+  defp timezone_matcher(%{component: component, integer_format: format} = marker) do
+    separator = if Format.regular?(format), do: timezone_separator(format), else: nil
+    prefix = if component == "z", do: "GMT", else: ""
+
+    regex =
+      prefix <> "[-+][0-9]+" <> if(separator, do: "#{Regex.escape(separator)}[0-9]+", else: "")
+
+    {regex, &parse_timezone_offset(&1, marker, separator), component}
+  end
+
+  defp timezone_separator(%{grouping: {:regular, _interval, char}}), do: char
+
+  defp parse_timezone_offset(value, %{component: component}, separator) do
+    value = if component == "z", do: String.replace_prefix(value, "GMT", ""), else: value
+
+    {hours, minutes} =
+      cond do
+        separator ->
+          split_offset(value, separator)
+
+        String.length(value) - 1 <= 2 ->
+          {String.to_integer(value), 0}
+
+        true ->
+          {value |> String.slice(0, 3) |> String.to_integer(),
+           value |> String.slice(3..-1//1) |> String.to_integer()}
+      end
+
+    hours * 60 + minutes
+  end
+
+  defp split_offset(value, separator) do
+    [hours, minutes] = String.split(value, separator, parts: 2)
+    {String.to_integer(hours), String.to_integer(minutes)}
+  end
+
+  # --- component resolution (F&O rules) -------------------------------------
+
+  defp resolve(components, _now_millis) when map_size(components) == 0, do: :undefined
+
+  defp resolve(components, now_millis) do
+    date_mask = mask(components, ~w(Y X M x W w d D))
+    date_a = type?(date_mask, @date_a)
+    date_b = not date_a and type?(date_mask, @date_b)
+    date_c = type?(date_mask, @date_c)
+    date_d = not date_c and type?(date_mask, @date_d)
+
+    time_mask = mask(components, ~w(P H h m s f))
+    time_b = not type?(time_mask, @time_a) and type?(time_mask, @time_b)
+
+    date_comps =
+      cond do
+        date_b -> ~w(Y D)
+        date_c -> ~w(X x w F)
+        date_d -> ~w(X W F)
+        true -> ~w(Y M D)
+      end
+
+    time_comps = if time_b, do: ~w(P h m s f), else: ~w(H m s f)
+
+    components
+    |> default_components(date_comps ++ time_comps, fields(now_millis))
+    |> build_millis(date_b, date_c, date_d, time_b)
+  end
+
+  defp mask(components, keys) do
+    Enum.reduce(keys, 0, fn key, mask ->
+      mask * 2 + if(Map.has_key?(components, key), do: 1, else: 0)
+    end)
+  end
+
+  # mask has no bits outside `type`, and at least one of `type`'s bits
+  defp type?(mask, type), do: band(bnot(type), mask) == 0 and band(type, mask) != 0
+
+  defp default_components(components, comps, now) do
+    {result, _started, _ended} =
+      Enum.reduce(comps, {components, false, false}, fn part, {map, started, ended} ->
+        cond do
+          Map.has_key?(map, part) and ended -> raise(Error.new("D3136"))
+          Map.has_key?(map, part) -> {map, true, ended}
+          started -> {Map.put(map, part, trailing_default(part)), started, true}
+          true -> {Map.put(map, part, fragment(now, part)), started, ended}
+        end
+      end)
+
+    result
+  end
+
+  defp trailing_default(part) when part in ~w(M D d), do: 1
+  defp trailing_default(_part), do: 0
+
+  defp build_millis(_components, _date_b, date_c, date_d, _time_b) when date_c or date_d,
+    do: raise(Error.new("D3136"))
+
+  defp build_millis(components, date_b, _date_c, _date_d, time_b) do
+    get = fn key -> Map.get(components, key, 0) end
+    date_millis = date_millis(components, date_b, get)
+    hour = resolve_hour(get.("H"), get.("h"), get.("P"), time_b)
+    millis = date_millis + ((hour * 60 + get.("m")) * 60 + get.("s")) * 1000 + get.("f")
+
+    case get.("Z") + get.("z") do
+      0 -> millis
+      offset_minutes -> millis - offset_minutes * 60 * 1000
+    end
+  end
+
+  defp date_millis(components, true = _date_b, get),
+    do: first_of_month_millis(get.("Y"), 1) + (components["d"] - 1) * @day_millis
+
+  defp date_millis(_components, _date_b, get) do
+    month = if get.("M") > 0, do: get.("M"), else: 1
+    first_of_month_millis(get.("Y"), month) + (get.("D") - 1) * @day_millis
+  end
+
+  defp resolve_hour(hour, h, period, time_b) do
+    if time_b do
+      base = if h == 12, do: 0, else: h
+      if period == 1, do: base + 12, else: base
+    else
+      hour
     end
   end
 end

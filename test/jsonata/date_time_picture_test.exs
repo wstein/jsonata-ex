@@ -56,4 +56,40 @@ defmodule Jsonata.DateTimePictureTest do
       assert fmt("[H01]:[m01][Z]", ts, "+0530") == "17:30+05:30"
     end
   end
+
+  describe "$toMillis picture parsing" do
+    defp parse(string, picture) do
+      {:ok, result} = Jsonata.evaluate("$toMillis(#{inspect(string)}, #{inspect(picture)})")
+      result
+    end
+
+    test "fixed-width fields with no separators" do
+      assert parse("201802", "[Y0001][M01]") == 1_517_443_200_000
+      assert parse("20180205", "[Y0001][M01][D01]") == 1_517_788_800_000
+    end
+
+    test "round-trips $fromMillis" do
+      assert parse("2018-02-05", "[Y0001]-[M01]-[D01]") == 1_517_788_800_000
+      assert parse("20240101123849", "[Y0001][M01][D01][H01][m01][s01]") == 1_704_112_729_000
+    end
+
+    test "named months and ordinal days" do
+      assert parse("21 August 2017", "[D1] [MNn] [Y0001]") == 1_503_273_600_000
+      assert parse("21st August 2017", "[D1o] [MNn] [Y0001]") == 1_503_273_600_000
+    end
+
+    test "spelled-out words" do
+      assert parse("twenty-first August two thousand and seventeen", "[Dwo] [MNn] [Yw]") ==
+               1_503_273_600_000
+    end
+
+    test "ISO partial forms (no picture)" do
+      assert {:ok, 1_509_321_600_000} = Jsonata.evaluate(~s|$toMillis("2017-10-30")|)
+      assert {:ok, 1_514_764_800_000} = Jsonata.evaluate(~s|$toMillis("2018")|)
+    end
+
+    test "a non-matching string yields undefined" do
+      assert {:ok, :undefined} = Jsonata.evaluate(~s|$toMillis("nope", "[Y0001]")|)
+    end
+  end
 end

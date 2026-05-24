@@ -100,6 +100,14 @@ defmodule Jsonata.Format do
   def regular?(%{grouping: {:regular, _interval, _char}}), do: true
   def regular?(_spec), do: false
 
+  @doc "Parses a `value` string into an integer using a spec from `analyse_integer/1`."
+  @spec parse_spec(String.t(), map()) :: integer()
+  def parse_spec(value, spec), do: parse_value(value, spec)
+
+  @doc "The recognised spelled-out number words (for building a parse regex)."
+  @spec word_keys() :: [String.t()]
+  def word_keys, do: Map.keys(@word_values)
+
   defp parse_value(value, %{primary: :letters, case: :upper}), do: letters_to_decimal(value, ?A)
   defp parse_value(value, %{primary: :letters, case: :lower}), do: letters_to_decimal(value, ?a)
   defp parse_value(value, %{primary: :roman}), do: roman_to_decimal(String.upcase(value))
