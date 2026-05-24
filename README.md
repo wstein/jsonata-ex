@@ -3,33 +3,58 @@
 A native Elixir port of [JSONata](https://jsonata.org/), the JSON query and
 transformation language. This is a clean-room reimplementation tracking the
 reference implementation [`jsonata-js`](https://github.com/jsonata-js/jsonata)
-v2.2.1, validated against its language-agnostic conformance suite.
+v2.2.1, validated against its language-agnostic conformance suite (~71% of
+specified cases pass; see the gaps below).
 
-> **Status: under construction.** The project is being built phase by phase
-> (see `../IMPLEMENTATION_PLAN.md` and `../MIGRATION.md`). The tokenizer and core
-> data model are implemented; the parser, evaluator, and function library are
-> the next phases. There is no public `evaluate/2` yet.
+## Usage
 
-## Architecture
+```elixir
+# Evaluate a string expression against data
+Jsonata.evaluate("Account.Order.Product.(Price * Quantity) ~> $sum()", data)
+#=> {:ok, 90.6}
 
-| Module | Responsibility |
-|--------|----------------|
-| `Jsonata.Tokenizer` | Binary-pattern-matching lexer (JSONata token grammar) |
-| `Jsonata.Token` | Token struct |
-| `Jsonata.AST` | Typed AST node structs produced by the parser |
-| `Jsonata.Sequence` | The JSONata sequence data model (`Enumerable`, eager/lazy-ready) |
-| `Jsonata.Value` | Type predicates and the "nothing" value (`:undefined` vs JSON `nil`) |
-| `Jsonata.Error` | JSONata error codes (`S0xxx`, `T0xxx`, `D0xxx`) |
-| `Jsonata.Conformance` | Loader for the upstream JSON conformance suite |
+# Compile once, reuse across many inputs
+{:ok, expr} = Jsonata.compile("items[price > 10].name")
+Jsonata.evaluate(expr, data)
+
+# Or write a literal expression with the compile-time sigil (~J is a short alias)
+import Jsonata, only: [sigil_JSONATA: 2]
+Jsonata.evaluate(~JSONATA"$uppercase(name)", %{"name" => "bob"})
+#=> {:ok, "BOB"}
+
+# Extend the language: an Elixir function bound as a variable is a callable $fn
+Jsonata.evaluate("$double(21)", :undefined, %{"double" => fn n -> n * 2 end})
+#=> {:ok, 42}
+```
+
+Input is plain decoded JSON (string-keyed maps, lists, scalars, `nil`). A missing
+result is `:undefined` (distinct from JSON `null`).
+
+## Implemented
+
+Paths, predicates, all operators, ranges, conditionals, blocks, variable binds,
+array/object constructors, wildcards/descendants; ~50 built-in functions with
+signature validation; lambdas with closures and self-recursion; higher-order
+functions; regex matchers; order-by `^`, group-by `{`, and the positional
+tuple-stream operators focus `@` / index `#` (joins); `$eval` and host functions.
+
+## Not yet implemented
+
+- Date/time and numeric **picture strings** (`$formatNumber`, `$formatInteger`,
+  `$parseInteger`, picture-string `$fromMillis`/`$toMillis`).
+- The **parent operator** `%`, the **transform** `|…|` operator, and
+  order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 
 ## Development
 
 ```bash
 mix deps.get
-mix compile --warnings-as-errors
 mix format --check-formatted
+mix compile --warnings-as-errors
 mix credo --strict
 mix test --cover
+mix dialyzer
+mix docs
 ```
 
 The conformance suite lives in the sibling `jsonata` submodule. When present,
