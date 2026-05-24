@@ -31,6 +31,11 @@ the upstream language-agnostic conformance suite (~80% of specified cases pass).
   ordinal modifier, Roman numerals (`i`/`I`), letter sequences (`a`/`A`), and
   spelled-out words (`w`/`W`/`Ww`). Non-ASCII digit groups and numbers ≥ 10⁴⁶ are
   not yet supported.
+- **`$string`** — ECMAScript-compatible number formatting (`1e21` → `"1e+21"`,
+  `1e-7` → `"1e-7"`, `1e-6` → `"0.000001"`), 15-significant-digit rounding of
+  non-integers (`22/7` → `"3.14285714285714"`), functions serialized as `""`, and
+  the `prettify` argument (2-space indented JSON). The `&` concatenation operator
+  shares the same number formatting.
 - **Host integration** — `$eval`, and registering Elixir functions as callable
   `$fn` via `Jsonata.evaluate/3` bindings.
 - **Tooling** — `credo --strict`, `dialyzer` (clean), 90%+ test coverage, and
@@ -38,8 +43,8 @@ the upstream language-agnostic conformance suite (~80% of specified cases pass).
 
 ### Not yet implemented
 
-- Date/time and numeric **picture strings** (`$formatNumber`/`$formatInteger`/
-  `$parseInteger`, picture-string `$fromMillis`/`$toMillis`).
+- Date/time and numeric **picture strings** (`$formatNumber`, picture-string
+  `$fromMillis`/`$toMillis`).
 - The **parent operator** `%`, the **transform** `|…|` operator, and
   order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 - JavaScript-style **async** functions (out of scope for the synchronous engine).

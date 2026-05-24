@@ -6,11 +6,12 @@ defmodule Jsonata.Functions do
   Covers aggregation, numeric, string, array/object, boolean, and control
   functions; the regex matchers (`$match` and the regex forms of `$contains`/
   `$split`/`$replace`); higher-order functions (`$map`, `$filter`, `$reduce`,
-  `$single`, `$sift`, `$each`, comparator `$sort`); and the non-picture date/time
-  functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`).
+  `$single`, `$sift`, `$each`, comparator `$sort`); the non-picture date/time
+  functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`); and the
+  integer picture strings `$formatInteger`/`$parseInteger` (`Jsonata.Format`).
 
-  Picture-string formatting (`$formatNumber`/`$formatInteger`/`$parseInteger`)
-  and the `$match` custom-matcher protocol are not yet implemented.
+  `$formatNumber` (DecimalFormat), date/time picture strings, and the `$match`
+  custom-matcher protocol are not yet implemented.
   """
 
   alias Jsonata.{Environment, Error, Function, Sequence, Signature, Value}
@@ -337,8 +338,8 @@ defmodule Jsonata.Functions do
   defp str1([value | _], fun), do: fun.(value)
 
   defp string([@undefined | _]), do: @undefined
-  defp string([value]), do: jstring(value)
-  defp string([value, _prettify]), do: jstring(value)
+  defp string([value]), do: jstring(value, false)
+  defp string([value, prettify]), do: jstring(value, prettify == true)
 
   defp trim(string) do
     string |> String.split(~r/\s+/, trim: true) |> Enum.join(" ")
@@ -618,21 +619,122 @@ defmodule Jsonata.Functions do
 
   @doc "JSONata `$string` serialization, exposed for the evaluator's `&` operator."
   @spec jstring(term()) :: String.t()
-  def jstring(value) when is_binary(value), do: value
-  def jstring(value) when is_boolean(value), do: to_string(value)
-  def jstring(nil), do: "null"
-  def jstring(value) when is_number(value), do: number_to_string(value)
-  def jstring(value), do: JSON.encode!(value)
+  def jstring(value), do: jstring(value, false)
 
-  @doc "JSONata number-to-string (whole floats lose the decimal point)."
+  @doc "JSONata `$string` serialization; `pretty?` enables 2-space indented JSON."
+  @spec jstring(term(), boolean()) :: String.t()
+  def jstring(value, _pretty?) when is_binary(value), do: value
+  def jstring(value, _pretty?) when is_boolean(value), do: to_string(value)
+  def jstring(nil, _pretty?), do: "null"
+  def jstring(%Function{}, _pretty?), do: ""
+  def jstring(value, _pretty?) when is_number(value), do: string_number(value)
+  def jstring(value, pretty?), do: encode_json(value, pretty?, 0)
+
+  # $string applies `Number(toPrecision(15))` to non-integer numbers (collapsing
+  # floating-point noise) before rendering with JS Number-to-string semantics.
+  defp string_number(value) when is_integer(value), do: Integer.to_string(value)
+
+  defp string_number(value) when is_float(value) do
+    rounded =
+      if value == Float.round(value) do
+        value
+      else
+        {f, _} = Float.parse(:erlang.iolist_to_binary(:io_lib.format(~c"~.15g", [value])))
+        f
+      end
+
+    number_to_string(rounded)
+  end
+
+  @doc "JSONata number-to-string, matching ECMAScript `Number.prototype.toString`."
   @spec number_to_string(number()) :: String.t()
   def number_to_string(value) when is_integer(value), do: Integer.to_string(value)
+  def number_to_string(value) when is_float(value) and value == 0.0, do: "0"
 
   def number_to_string(value) when is_float(value) do
-    if value == Float.round(value) and abs(value) < 1.0e21 do
-      value |> trunc() |> Integer.to_string()
-    else
-      to_string(value)
+    sign = if value < 0, do: "-", else: ""
+    {digits, n} = significant_digits(abs(value))
+    sign <> ecma_number(digits, n)
+  end
+
+  # Returns {digits, n}: `digits` are the shortest significant decimal digits and
+  # the value equals `digits × 10^(n - length(digits))` (ECMA-262 6.1.6.1.20).
+  defp significant_digits(value) do
+    {mantissa, exp} =
+      case String.split(:erlang.float_to_binary(value, [:short]), ["e", "E"]) do
+        [m] -> {m, 0}
+        [m, e] -> {m, String.to_integer(e)}
+      end
+
+    {int_part, frac_part} =
+      case String.split(mantissa, ".") do
+        [i] -> {i, ""}
+        [i, f] -> {i, f}
+      end
+
+    s0 = String.to_integer(int_part <> frac_part)
+    {s, power} = strip_trailing_zeros(s0, exp - String.length(frac_part))
+    digits = Integer.to_string(s)
+    {digits, power + String.length(digits)}
+  end
+
+  defp strip_trailing_zeros(s, power) when s != 0 and rem(s, 10) == 0,
+    do: strip_trailing_zeros(div(s, 10), power + 1)
+
+  defp strip_trailing_zeros(s, power), do: {s, power}
+
+  defp ecma_number(digits, n) do
+    k = String.length(digits)
+
+    cond do
+      k <= n and n <= 21 -> digits <> String.duplicate("0", n - k)
+      0 < n and n <= 21 -> String.slice(digits, 0, n) <> "." <> String.slice(digits, n, k - n)
+      -6 < n and n <= 0 -> "0." <> String.duplicate("0", -n) <> digits
+      true -> ecma_exponential(digits, k, n)
+    end
+  end
+
+  defp ecma_exponential(digits, k, n) do
+    mantissa =
+      if k == 1,
+        do: digits,
+        else: String.slice(digits, 0, 1) <> "." <> String.slice(digits, 1, k - 1)
+
+    exponent = n - 1
+    sign = if exponent >= 0, do: "+", else: "-"
+    mantissa <> "e" <> sign <> Integer.to_string(abs(exponent))
+  end
+
+  # JSON serialization for $string of composite values (the JSON.stringify path):
+  # numbers are rounded as above, functions render as the empty string.
+  defp encode_json(nil, _pretty?, _depth), do: "null"
+  defp encode_json(value, _pretty?, _depth) when is_boolean(value), do: to_string(value)
+  defp encode_json(value, _pretty?, _depth) when is_number(value), do: string_number(value)
+  defp encode_json(value, _pretty?, _depth) when is_binary(value), do: JSON.encode!(value)
+  defp encode_json(%Function{}, _pretty?, _depth), do: "\"\""
+
+  defp encode_json(value, pretty?, depth) when is_list(value),
+    do: encode_container(value, "[", "]", pretty?, depth, &encode_json(&1, pretty?, depth + 1))
+
+  defp encode_json(value, pretty?, depth) when is_map(value) do
+    encode_container(value, "{", "}", pretty?, depth, fn {key, val} ->
+      JSON.encode!(to_string(key)) <>
+        if(pretty?, do: ": ", else: ":") <> encode_json(val, pretty?, depth + 1)
+    end)
+  end
+
+  defp encode_container(enum, open, close, pretty?, depth, encode_item) do
+    case Enum.map(enum, encode_item) do
+      [] ->
+        open <> close
+
+      items when pretty? ->
+        pad = String.duplicate("  ", depth + 1)
+        body = Enum.map_join(items, ",\n", &(pad <> &1))
+        open <> "\n" <> body <> "\n" <> String.duplicate("  ", depth) <> close
+
+      items ->
+        open <> Enum.join(items, ",") <> close
     end
   end
 

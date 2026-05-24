@@ -91,6 +91,35 @@ defmodule Jsonata.FunctionsTest do
       assert eval("$string(5)") == "5"
       assert eval("$string(true)") == "true"
       assert eval("$string([1, 2])") == "[1,2]"
+      assert eval("$string(null)") == "null"
+    end
+
+    test "number-to-string uses ECMAScript Number formatting" do
+      assert eval("$string(1e21)") == "1e+21"
+      assert eval("$string(1e100)") == "1e+100"
+      assert eval("$string(1e-6)") == "0.000001"
+      assert eval("$string(1e-7)") == "1e-7"
+      assert eval("$string(100.5)") == "100.5"
+      assert eval("$string(-0.5)") == "-0.5"
+    end
+
+    test "non-integer numbers round to 15 significant digits" do
+      assert eval("$string(22/7)") == "3.14285714285714"
+      assert eval("$string($sum([90.57000000000001]))") == "90.57"
+    end
+
+    test "functions serialize as the empty string" do
+      assert eval("$string($string)") == ""
+      assert eval("$string(function(){1})") == ""
+    end
+
+    test "prettify indents composite values" do
+      assert eval(~s|$string({"a": 1}, true)|) == "{\n  \"a\": 1\n}"
+      assert eval(~s|$string([1, 2], true)|) == "[\n  1,\n  2\n]"
+    end
+
+    test "concatenation operator applies the same number rounding" do
+      assert eval("5 & \"x\" & (1/3)") == "5x0.333333333333333"
     end
   end
 
