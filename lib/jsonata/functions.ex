@@ -629,11 +629,11 @@ defmodule Jsonata.Functions do
     end
   end
 
+  # Always called with a float result (sqrt/pow/division); collapses whole values
+  # to integers to match JSONata's single number type.
   defp normalize_number(value) when is_float(value) do
     if value == Float.round(value) and abs(value) < 1.0e15, do: trunc(value), else: value
   end
-
-  defp normalize_number(value), do: value
 
   defp as_list(value) when is_list(value), do: value
   defp as_list(value), do: [value]

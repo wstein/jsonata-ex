@@ -3,17 +3,40 @@ defmodule Jsonata do
   A native Elixir port of the [JSONata](https://jsonata.org/) query and
   transformation language.
 
-  This module is the intended public entry point. The language is being
-  implemented in phases; the parser and evaluator are not yet wired up, so no
-  `evaluate/2` is exposed. The building blocks available today are
-  `Jsonata.Tokenizer`, `Jsonata.Sequence`, `Jsonata.AST`, and `Jsonata.Value`.
+  Evaluate an expression against data with `evaluate/3`, or `compile/1` it once
+  (or write it as a `~J` sigil) and reuse the compiled form across many inputs.
+
+  ## Examples
+
+      iex> Jsonata.evaluate("Account.Order.Product.(Price * Quantity)",
+      ...>   %{"Account" => %{"Order" => %{"Product" => %{"Price" => 10, "Quantity" => 3}}}})
+      {:ok, 30}
+
+      iex> import Jsonata, only: [sigil_J: 2]
+      iex> Jsonata.evaluate(~J"a + b", %{"a" => 1, "b" => 2})
+      {:ok, 3}
+
   """
 
-  alias Jsonata.{Environment, Error, Evaluator, Functions, Parser}
+  alias Jsonata.{Environment, Error, Evaluator, Expression, Functions, Parser}
+
+  @typedoc "Variable bindings; a value that is an Elixir function becomes a callable `$fn`."
+  @type bindings :: %{optional(String.t()) => term()}
 
   @doc """
-  Evaluates a JSONata `expression` against `input`, with optional `bindings`
-  (a map of names to values, without the leading `$`).
+  Compiles a JSONata `expression` so it can be evaluated against many inputs
+  without re-parsing. Returns `{:ok, %Jsonata.Expression{}}` or `{:error, _}`.
+  """
+  @spec compile(binary()) :: {:ok, Expression.t()} | {:error, Error.t()}
+  def compile(expression) when is_binary(expression) do
+    with {:ok, ast} <- Parser.parse(expression) do
+      {:ok, %Expression{ast: ast, source: expression}}
+    end
+  end
+
+  @doc """
+  Evaluates a JSONata `expression` (a string or a compiled `Jsonata.Expression`)
+  against `input`, with optional `bindings` (names without the leading `$`).
 
   A binding whose value is an Elixir function is registered as a callable
   JSONata function — host code can extend the language this way (`$myFn(...)`).
@@ -33,18 +56,46 @@ defmodule Jsonata do
       {:ok, 42}
 
   """
-  @spec evaluate(binary(), term(), %{optional(String.t()) => term()}) ::
+  @spec evaluate(binary() | Expression.t(), term(), bindings()) ::
           {:ok, term()} | {:error, Error.t()}
-  def evaluate(expression, input \\ :undefined, bindings \\ %{}) when is_binary(expression) do
-    with {:ok, ast} <- Parser.parse(expression) do
-      env =
-        bindings
-        |> Enum.reduce(Functions.bind_all(Environment.root(input)), fn {name, value}, env ->
-          Environment.bind(env, name, host_value(name, value))
-        end)
+  def evaluate(expression, input \\ :undefined, bindings \\ %{})
 
-      {:ok, Evaluator.evaluate(ast, input, env)}
+  def evaluate(%Expression{ast: ast}, input, bindings), do: run(ast, input, bindings)
+
+  def evaluate(expression, input, bindings) when is_binary(expression) do
+    with {:ok, ast} <- Parser.parse(expression), do: run(ast, input, bindings)
+  end
+
+  @doc ~S"""
+  Compiles a literal JSONata expression at compile time.
+
+  `~J"expr"` expands to a `Jsonata.Expression` parsed during compilation, so the
+  expression is validated when the module compiles and never re-parsed at
+  runtime. Interpolation is rejected (an injection guard); build dynamic
+  expressions with `compile/1` instead.
+
+      ~J"Account.Order[0].Price"
+  """
+  defmacro sigil_J({:<<>>, _meta, [string]}, _modifiers) when is_binary(string),
+    do: compile_literal(string)
+
+  defmacro sigil_J(string, _modifiers) when is_binary(string),
+    do: compile_literal(string)
+
+  defp compile_literal(string) do
+    case Parser.parse(string) do
+      {:ok, ast} -> Macro.escape(%Expression{ast: ast, source: string})
+      {:error, error} -> raise error
     end
+  end
+
+  defp run(ast, input, bindings) do
+    env =
+      Enum.reduce(bindings, Functions.bind_all(Environment.root(input)), fn {name, value}, env ->
+        Environment.bind(env, name, host_value(name, value))
+      end)
+
+    {:ok, Evaluator.evaluate(ast, input, env)}
   rescue
     error in Error -> {:error, error}
   end
