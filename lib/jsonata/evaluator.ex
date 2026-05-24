@@ -92,6 +92,41 @@ defmodule Jsonata.Evaluator do
 
   defp eval_node(%{type: :lambda} = expr, input, env), do: {make_lambda(expr, input, env), env}
 
+  defp eval_node(%{type: :partial} = expr, input, env),
+    do: {partial_apply(expr, input, env), env}
+
+  # `$f(?, x)` builds a function awaiting the placeholder positions.
+  defp partial_apply(expr, input, env) do
+    proc = eval_val(expr.procedure, input, env)
+
+    args =
+      Enum.map(expr.arguments, fn
+        %{type: :placeholder} = hole -> hole
+        arg -> wrap_argument(eval_val(arg, input, env), input)
+      end)
+
+    holes = Enum.count(args, &match?(%{type: :placeholder}, &1))
+
+    %Function{
+      name: "partial",
+      arity: holes,
+      impl: fn supplied ->
+        apply_function(proc, fill_holes(args, supplied), nil, expr.position)
+      end
+    }
+  end
+
+  defp fill_holes(args, supplied) do
+    {filled, _rest} =
+      Enum.map_reduce(args, supplied, fn
+        %{type: :placeholder}, [value | rest] -> {value, rest}
+        %{type: :placeholder}, [] -> {@undefined, []}
+        arg, rest -> {arg, rest}
+      end)
+
+    filled
+  end
+
   defp make_lambda(expr, input, env) do
     %Function{
       name: "lambda",

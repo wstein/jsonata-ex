@@ -308,7 +308,7 @@ defmodule Jsonata.Parser do
   defp call_args(%{tok: %{id: ")"}} = state, acc), do: {Enum.reverse(acc), state}
 
   defp call_args(state, acc) do
-    {arg, state} = expression(state, 0)
+    {arg, state} = call_arg(state)
     acc = [arg | acc]
 
     if state.tok.id == "," do
@@ -318,11 +318,22 @@ defmodule Jsonata.Parser do
     end
   end
 
+  # A bare `?` is a partial-application placeholder.
+  defp call_arg(%{tok: %{id: "?"} = tok} = state),
+    do: {%{type: :placeholder, position: tok.position}, advance(state, "?")}
+
+  defp call_arg(state), do: expression(state, 0)
+
   defp build_call(left, args, state, position) do
-    if left.type == :name and left.value in ["function", "λ"] do
-      build_lambda(args, state, position)
-    else
-      {%{type: :function, procedure: left, arguments: args, position: position}, state}
+    cond do
+      left.type == :name and left.value in ["function", "λ"] ->
+        build_lambda(args, state, position)
+
+      Enum.any?(args, &match?(%{type: :placeholder}, &1)) ->
+        {%{type: :partial, procedure: left, arguments: args, position: position}, state}
+
+      true ->
+        {%{type: :function, procedure: left, arguments: args, position: position}, state}
     end
   end
 
@@ -445,7 +456,7 @@ defmodule Jsonata.Parser do
     %{expr | lhs: process_ast(expr.lhs), rhs: process_ast(expr.rhs)}
   end
 
-  defp process_ast(%{type: :function} = expr) do
+  defp process_ast(%{type: type} = expr) when type in [:function, :partial] do
     %{
       expr
       | procedure: process_ast(expr.procedure),

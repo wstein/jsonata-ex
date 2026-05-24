@@ -226,5 +226,10 @@ defmodule Jsonata.EvaluatorTest do
       assert eval("[1, 2, 3] ~> $sum()") == 6
       assert eval(~s|($t := $trim ~> $uppercase; $t("  hi  "))|) == "HI"
     end
+
+    test "partial application with ? placeholders" do
+      assert eval(~s|($after := $substringAfter(?, "@"); $after("u@ex.com"))|) == "ex.com"
+      assert eval("($add := function($a, $b){$a + $b}; $add5 := $add(5, ?); $add5(10))") == 15
+    end
   end
 end
