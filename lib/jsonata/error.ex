@@ -31,7 +31,19 @@ defmodule Jsonata.Error do
     "S0211" => "The symbol {{token}} cannot be used as a unary operator",
     "S0212" => "The left side of := must be a variable name (start with $)",
     "S0213" => "The literal value {{value}} cannot be used as a step within a path expression",
-    # Dynamic (evaluation) errors
+    # Dynamic / type (evaluation) errors
+    "D1002" => "Cannot negate a non-numeric value: {{value}}",
+    "T1003" => "Key in object structure must evaluate to a string; got: {{value}}",
+    "T2001" => "The left side of the {{token}} operator must evaluate to a number",
+    "T2002" => "The right side of the {{token}} operator must evaluate to a number",
+    "T2003" => "The left side of the range operator (..) must evaluate to an integer",
+    "T2004" => "The right side of the range operator (..) must evaluate to an integer",
+    "T2009" =>
+      "The values {{value}} and {{value2}} either side of operator {{token}} must be of the same data type",
+    "T2010" =>
+      "The expressions either side of operator {{token}} must evaluate to numeric or string values",
+    "D2014" =>
+      "The size of the sequence allocated by the range operator (..) must not exceed 1e7.  Attempted to allocate {{value}}.",
     "D2015" => "The maximum sequence length of {{value}} was exceeded."
   }
 
@@ -49,15 +61,13 @@ defmodule Jsonata.Error do
   @spec exception(keyword()) :: t()
   def exception(opts) when is_list(opts) do
     code = Keyword.fetch!(opts, :code)
-    token = Keyword.get(opts, :token)
-    value = Keyword.get(opts, :value)
 
     %__MODULE__{
       code: code,
       position: Keyword.get(opts, :position),
-      token: token,
-      value: value,
-      message: render(code, token: token, value: value)
+      token: Keyword.get(opts, :token),
+      value: Keyword.get(opts, :value),
+      message: render(code, Keyword.drop(opts, [:code, :position]))
     }
   end
 

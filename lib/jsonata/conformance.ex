@@ -151,10 +151,23 @@ defmodule Jsonata.Conformance do
       name: name,
       expr: expr(raw, group_dir),
       dataset: raw["dataset"],
-      data: Map.get(raw, "data"),
+      data: Map.get(raw, "data", :absent),
       bindings: Map.get(raw, "bindings", %{}),
       expected: expected(raw)
     }
+  end
+
+  @doc """
+  Resolves the input for a case: the named dataset, the inline `data`, or
+  `:undefined` when the case declares neither.
+  """
+  @spec input(String.t(), Case.t()) :: term()
+  def input(root \\ @default_root, %Case{} = kase) do
+    cond do
+      kase.dataset -> dataset(root, kase.dataset)
+      kase.data != :absent -> kase.data
+      true -> :undefined
+    end
   end
 
   defp expr(%{"expr" => expr}, _group_dir) when is_binary(expr), do: expr

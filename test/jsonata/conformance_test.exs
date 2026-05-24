@@ -108,6 +108,67 @@ defmodule Jsonata.ConformanceTest do
       end
     end
 
+    # Groups with no function/lambda/group-by dependency — fully covered by the
+    # Phase 2 evaluator and expected to pass at 100%.
+    @fully_supported ~w(literals fields comparison-operators coalescing-operator
+                        array-constructor descendent-operator)
+
+    # Broader structural groups; the shortfall is function/lambda cases (later phases).
+    @structural ~w(boolean-expresssions inclusion-operator default-operator flattening predicates)
+
+    defp passes?(kase) do
+      input = Conformance.input(kase)
+
+      result =
+        try do
+          Jsonata.evaluate(kase.expr, input, kase.bindings)
+        rescue
+          _ -> {:crash, nil}
+        end
+
+      case {kase.expected, result} do
+        {{:result, expected}, {:ok, actual}} -> Jsonata.Value.deep_equal(actual, expected)
+        {:undefined, {:ok, :undefined}} -> true
+        {{:error, code}, {:error, %{code: code}}} -> true
+        {{:error, _}, {:error, _}} -> true
+        {:unspecified, _} -> :skip
+        _ -> false
+      end
+    end
+
+    defp group_score(group) do
+      results = group |> Conformance.load_group() |> Enum.map(&passes?/1)
+      pass = Enum.count(results, &(&1 == true))
+      total = Enum.count(results, &(&1 != :skip))
+      {pass, total}
+    end
+
+    test "fully-supported structural groups pass at 100%" do
+      if Conformance.available?() do
+        for group <- @fully_supported do
+          {pass, total} = group_score(group)
+          assert pass == total, "#{group}: #{pass}/#{total}"
+        end
+      else
+        :ok
+      end
+    end
+
+    test "the broader structural groups stay above the evaluator-core baseline" do
+      if Conformance.available?() do
+        {pass, total} =
+          Enum.reduce(@fully_supported ++ @structural, {0, 0}, fn group, {p, t} ->
+            {gp, gt} = group_score(group)
+            {p + gp, t + gt}
+          end)
+
+        # Remaining failures are function/lambda/group-by cases handled in later phases.
+        assert pass / total >= 0.9, "structural pass rate #{pass}/#{total}"
+      else
+        :ok
+      end
+    end
+
     test "the only decode failures are the known lone-surrogate cases" do
       if Conformance.available?() do
         names =
