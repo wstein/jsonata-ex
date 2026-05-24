@@ -17,7 +17,7 @@ defmodule Jsonata.Function do
   """
 
   @enforce_keys [:name]
-  defstruct [:name, :impl, :signature, :params, :body, :env, :input, :self_name, arity: 0]
+  defstruct [:name, :impl, :signature, :params, :body, :env, :input, :self_name, :regex, arity: 0]
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -28,6 +28,7 @@ defmodule Jsonata.Function do
           env: term() | nil,
           input: term() | nil,
           self_name: String.t() | nil,
+          regex: Regex.t() | nil,
           arity: non_neg_integer()
         }
 end

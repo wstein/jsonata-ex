@@ -11,9 +11,10 @@ defmodule Jsonata.Evaluator do
   Scope: paths/steps, predicates, all binary/unary operators, ranges,
   conditionals, blocks, binds, array/object constructors, wildcards, descendants,
   variables (Phase 2); function invocation, lambdas with closures and
-  self-recursion, the `~>` apply/compose operator, and higher-order functions
-  (Phases 3-4). Not yet evaluated: regex matchers, the transform `|` operator,
-  order-by `^`, grouping `{`, focus `@` / index `#`, and partial application `?`.
+  self-recursion, the `~>` apply/compose operator, higher-order functions, regex
+  matchers, and `$eval` (Phases 3-4, 6). Not yet evaluated: the transform `|`
+  operator, order-by `^`, grouping `{`, focus `@` / index `#` (tuple streams),
+  and partial application `?`.
   """
 
   alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
@@ -64,7 +65,8 @@ defmodule Jsonata.Evaluator do
   defp eval_node(%{type: :variable} = expr, input, env),
     do: {evaluate_variable(expr, input, env), env}
 
-  defp eval_node(%{type: :regex} = expr, _input, env), do: {expr.value, env}
+  defp eval_node(%{type: :regex} = expr, _input, env),
+    do: {Functions.regex_function(expr.value), env}
 
   defp eval_node(%{type: literal} = expr, _input, env) when literal in [:number, :string, :value],
     do: {expr.value, env}
@@ -112,6 +114,19 @@ defmodule Jsonata.Evaluator do
 
   defp name_lambda(value, _name), do: value
 
+  # `$eval(str, context?)` parses and evaluates a JSONata string in the current
+  # scope; it is a special form because it needs the parser and environment.
+  defp evaluate_function(
+         %{procedure: %{type: :variable, value: "eval"}} = expr,
+         input,
+         env,
+         applyto
+       ) do
+    args = Enum.map(expr.arguments, &eval_val(&1, input, env))
+    args = if applyto == :none, do: args, else: [applyto | args]
+    eval_string(args, input, env)
+  end
+
   # `applyto` (the LHS of `~>`) is prepended to the argument list when present.
   defp evaluate_function(expr, input, env, applyto) do
     proc = eval_val(expr.procedure, input, env)
@@ -123,7 +138,12 @@ defmodule Jsonata.Evaluator do
   # A function passed as an argument is wrapped as a closure so higher-order
   # functions (in Jsonata.Functions) can apply it without depending on the evaluator.
   defp wrap_argument(%Function{} = func, input) do
-    %Function{name: func.name, arity: func.arity, impl: &apply_function(func, &1, input, nil)}
+    %Function{
+      name: func.name,
+      arity: func.arity,
+      regex: func.regex,
+      impl: &apply_function(func, &1, input, nil)
+    }
   end
 
   defp wrap_argument(value, _input), do: value
@@ -184,6 +204,17 @@ defmodule Jsonata.Evaluator do
 
   defp validate_args(signature, args, input, name),
     do: Signature.validate(signature, args, input, name)
+
+  defp eval_string([@undefined | _], _input, _env), do: @undefined
+
+  defp eval_string([source | rest], input, env) when is_binary(source) do
+    context = if match?([ctx | _] when ctx != @undefined, rest), do: hd(rest), else: input
+
+    case Jsonata.Parser.parse(source) do
+      {:ok, ast} -> evaluate(ast, context, env)
+      {:error, error} -> raise error
+    end
+  end
 
   # --- paths ----------------------------------------------------------------
 

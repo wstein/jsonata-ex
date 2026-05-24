@@ -200,6 +200,48 @@ defmodule Jsonata.FunctionsTest do
     end
   end
 
+  describe "regular expressions" do
+    test "$match returns match objects with groups and char indices" do
+      assert eval(~s|$match("ababab", /ab/)|) == [
+               %{"match" => "ab", "index" => 0, "groups" => []},
+               %{"match" => "ab", "index" => 2, "groups" => []},
+               %{"match" => "ab", "index" => 4, "groups" => []}
+             ]
+
+      assert eval(~s|$match("a1", /([a-z])([0-9])/).groups|) == ["a", "1"]
+    end
+
+    test "$match honors a limit" do
+      assert eval(~s|$count($match("aaaa", /a/, 2))|) == 2
+    end
+
+    test "regex variants of contains, split, replace" do
+      assert eval(~s|$contains("hello", /l+/)|) == true
+      assert eval(~s|$split("a1b2c", /[0-9]/)|) == ["a", "b", "c"]
+      assert eval(~s|$replace("hello", /l/, "L")|) == "heLLo"
+      assert eval(~s|$replace("2024-01", /(\\d+)-(\\d+)/, "$2/$1")|) == "01/2024"
+    end
+
+    test "a regex literal is callable and matches the first occurrence" do
+      assert eval(~s|/o/("foo")|) == %{"match" => "o", "index" => 1, "groups" => []}
+    end
+  end
+
+  describe "$eval and host functions" do
+    test "$eval parses and evaluates in the current scope" do
+      assert eval(~s|$eval("[1,2,3].($*2)")|) == [2, 4, 6]
+      assert eval(~s|($x := 5; $eval("$x + 1"))|) == 6
+    end
+
+    test "an Elixir function bound as a variable is callable" do
+      assert {:ok, 42} =
+               Jsonata.evaluate("$double(21)", :undefined, %{"double" => fn n -> n * 2 end})
+
+      assert {:ok, 7} =
+               Jsonata.evaluate("$add(3, 4)", :undefined, %{"add" => fn a, b -> a + b end})
+    end
+  end
+
   describe "edge cases" do
     test "number of false, string with prettify flag" do
       assert eval("$number(false)") == 0

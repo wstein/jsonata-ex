@@ -1,12 +1,16 @@
 defmodule Jsonata.Functions do
   @moduledoc """
-  The JSONata built-in function library (the non-temporal, non-higher-order
-  subset — Phase 3). Each entry pairs a name with its signature and an
-  implementation taking the validated argument list.
+  The JSONata built-in function library. Each registry entry pairs a name with
+  its signature and an implementation taking the validated argument list.
 
-  Higher-order functions (`$map`, `$filter`, `$reduce`, `$sift`, `$each`,
-  `$single`, comparator `$sort`), regex-based `$match`/`$contains`/`$replace`/
-  `$split`, and date/time functions are implemented in later phases.
+  Covers aggregation, numeric, string, array/object, boolean, and control
+  functions; the regex matchers (`$match` and the regex forms of `$contains`/
+  `$split`/`$replace`); higher-order functions (`$map`, `$filter`, `$reduce`,
+  `$single`, `$sift`, `$each`, comparator `$sort`); and the non-picture date/time
+  functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`).
+
+  Picture-string formatting (`$formatNumber`/`$formatInteger`/`$parseInteger`)
+  and the `$match` custom-matcher protocol are not yet implemented.
   """
 
   alias Jsonata.{Environment, Error, Function, Sequence, Signature, Value}
@@ -72,6 +76,7 @@ defmodule Jsonata.Functions do
       {"split", "<s-(sf)n?:a<s>>", &split/1},
       {"join", "<a<s>s?:s>", &join/1},
       {"replace", "<s-(sf)(sf)n?:s>", &replace/1},
+      {"match", "<s-f<s:o>n?:a<o>>", &match/1},
       {"base64encode", "<s-:s>", fn args -> str1(args, &Base.encode64/1) end},
       {"base64decode", "<s-:s>", fn args -> str1(args, &Base.decode64!/1) end},
       {"encodeUrlComponent", "<s-:s>", fn args -> str1(args, &encode_component/1) end},
@@ -358,6 +363,7 @@ defmodule Jsonata.Functions do
   end
 
   defp contains([@undefined | _]), do: @undefined
+  defp contains([string, %Function{regex: regex}]), do: Regex.match?(regex, string)
 
   defp contains([string, substring]) when is_binary(substring),
     do: String.contains?(string, substring)
@@ -366,6 +372,9 @@ defmodule Jsonata.Functions do
   defp split([string, separator]), do: split([string, separator, @undefined])
 
   defp split([string, "", limit]), do: string |> String.graphemes() |> take_limit(limit)
+
+  defp split([string, %Function{regex: regex}, limit]),
+    do: regex |> Regex.split(string) |> take_limit(limit)
 
   defp split([string, separator, limit]) when is_binary(separator),
     do: string |> String.split(separator) |> take_limit(limit)
@@ -380,8 +389,18 @@ defmodule Jsonata.Functions do
 
   defp replace([@undefined | _]), do: @undefined
 
-  defp replace([string, pattern, replacement]) when is_binary(pattern) and is_binary(replacement),
+  defp replace([string, pattern, replacement]),
     do: replace([string, pattern, replacement, @undefined])
+
+  defp replace([string, %Function{regex: regex}, replacement, limit])
+       when is_binary(replacement) do
+    replacement = String.replace(replacement, ~r/\$(\d)/, "\\\\\\1")
+
+    case limit do
+      @undefined -> Regex.replace(regex, string, replacement)
+      n -> Regex.replace(regex, string, replacement, global: trunc(n) > 1)
+    end
+  end
 
   defp replace([string, pattern, replacement, limit])
        when is_binary(pattern) and is_binary(replacement) do
@@ -399,6 +418,56 @@ defmodule Jsonata.Functions do
       [whole] -> whole
     end
   end
+
+  # --- regular expressions --------------------------------------------------
+
+  @doc "Builds a callable matcher function from a tokenized regex literal."
+  @spec regex_function(%{pattern: String.t(), flags: String.t()}) :: Function.t()
+  def regex_function(%{pattern: pattern, flags: flags}) do
+    regex = Regex.compile!(pattern, regex_opts(flags))
+
+    %Function{
+      name: "regex",
+      regex: regex,
+      arity: 1,
+      impl: fn args -> regex_apply(regex, args) end
+    }
+  end
+
+  defp regex_opts(flags),
+    do: flags |> String.graphemes() |> Enum.filter(&(&1 in ["i", "m"])) |> Enum.join()
+
+  # Applying a regex to a string returns the first match object (or undefined).
+  defp regex_apply(regex, [string | _]) when is_binary(string) do
+    case regex_matches(regex, string) do
+      [first | _] -> first
+      [] -> @undefined
+    end
+  end
+
+  defp regex_apply(_regex, _args), do: @undefined
+
+  defp match([@undefined | _]), do: @undefined
+  defp match([string, regex]), do: match([string, regex, @undefined])
+
+  defp match([string, %Function{regex: regex}, limit]) do
+    regex |> regex_matches(string) |> take_limit(limit) |> Sequence.from_value()
+  end
+
+  defp regex_matches(regex, string) do
+    regex
+    |> Regex.scan(string, return: :index)
+    |> Enum.map(fn [{start, len} | groups] ->
+      %{
+        "match" => binary_part(string, start, len),
+        "index" => string |> binary_part(0, start) |> String.length(),
+        "groups" => Enum.map(groups, &group_value(string, &1))
+      }
+    end)
+  end
+
+  defp group_value(_string, {-1, _len}), do: @undefined
+  defp group_value(string, {start, len}), do: binary_part(string, start, len)
 
   defp encode_component(string), do: URI.encode(string, &URI.char_unreserved?/1)
   defp encode_url(string), do: URI.encode(string)
