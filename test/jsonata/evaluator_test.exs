@@ -202,8 +202,10 @@ defmodule Jsonata.EvaluatorTest do
   end
 
   describe "later phases" do
-    test "function and lambda evaluation is not yet implemented" do
-      assert_raise RuntimeError, ~r/later phase/, fn -> Jsonata.evaluate("$foo()", %{}) end
+    test "lambda evaluation is not yet implemented" do
+      assert_raise RuntimeError, ~r/later phase/, fn ->
+        Jsonata.evaluate("function($x){$x}(1)", %{})
+      end
     end
   end
 end

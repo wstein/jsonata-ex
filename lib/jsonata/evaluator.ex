@@ -14,7 +14,7 @@ defmodule Jsonata.Evaluator do
   implemented in later phases.
   """
 
-  alias Jsonata.{Environment, Error, Sequence, Value}
+  alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
 
   @undefined :undefined
 
@@ -80,9 +80,28 @@ defmodule Jsonata.Evaluator do
     {result, env}
   end
 
-  defp eval_node(%{type: type}, _input, _env) when type in [:function, :lambda] do
-    raise "evaluation of #{type} nodes is implemented in a later phase"
+  defp eval_node(%{type: :function} = expr, input, env),
+    do: {evaluate_function(expr, input, env), env}
+
+  defp eval_node(%{type: :lambda}, _input, _env) do
+    raise "evaluation of lambda nodes is implemented in a later phase"
   end
+
+  defp evaluate_function(expr, input, env) do
+    proc = eval_val(expr.procedure, input, env)
+    args = Enum.map(expr.arguments, &eval_val(&1, input, env))
+    apply_function(proc, args, input, expr.position)
+  end
+
+  defp apply_function(%Function{signature: nil} = func, args, _input, _position),
+    do: func.impl.(args)
+
+  defp apply_function(%Function{} = func, args, input, _position) do
+    func.impl.(Signature.validate(func.signature, args, input, func.name))
+  end
+
+  defp apply_function(_proc, _args, _input, position),
+    do: raise(Error.new("T1006", position: position))
 
   # --- paths ----------------------------------------------------------------
 
@@ -452,33 +471,12 @@ defmodule Jsonata.Evaluator do
   defp truthy?(value), do: boolize(value)
 
   defp boolize(@undefined), do: false
-  defp boolize(value) when is_boolean(value), do: value
-  defp boolize(value) when is_binary(value), do: value != ""
-  defp boolize(value) when is_number(value), do: value != 0
-  defp boolize(nil), do: false
-  defp boolize(%Sequence{} = seq), do: boolize(Enum.to_list(seq))
-  defp boolize([single]), do: boolize(single)
-  defp boolize(value) when is_list(value), do: Enum.any?(value, &boolize/1)
-  defp boolize(value) when is_map(value) and not is_struct(value), do: map_size(value) > 0
-  defp boolize(_value), do: false
+  defp boolize(%Sequence{} = seq), do: Functions.jboolean(Enum.to_list(seq))
+  defp boolize(value), do: Functions.jboolean(value)
 
   defp string_concat(lhs, rhs), do: to_jsonata_string(lhs) <> to_jsonata_string(rhs)
 
   defp to_jsonata_string(@undefined), do: ""
-  defp to_jsonata_string(value) when is_binary(value), do: value
-  defp to_jsonata_string(value) when is_boolean(value), do: to_string(value)
-  defp to_jsonata_string(nil), do: "null"
-  defp to_jsonata_string(value) when is_number(value), do: number_to_string(value)
   defp to_jsonata_string(%Sequence{} = seq), do: to_jsonata_string(Sequence.to_value(seq))
-  defp to_jsonata_string(value), do: JSON.encode!(value)
-
-  defp number_to_string(value) when is_integer(value), do: Integer.to_string(value)
-
-  defp number_to_string(value) when is_float(value) do
-    if value == Float.round(value) and abs(value) < 1.0e21 do
-      value |> trunc() |> Integer.to_string()
-    else
-      to_string(value)
-    end
-  end
+  defp to_jsonata_string(value), do: Functions.jstring(value)
 end

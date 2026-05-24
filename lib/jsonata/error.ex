@@ -44,7 +44,23 @@ defmodule Jsonata.Error do
       "The expressions either side of operator {{token}} must evaluate to numeric or string values",
     "D2014" =>
       "The size of the sequence allocated by the range operator (..) must not exceed 1e7.  Attempted to allocate {{value}}.",
-    "D2015" => "The maximum sequence length of {{value}} was exceeded."
+    "D2015" => "The maximum sequence length of {{value}} was exceeded.",
+    # Function invocation / signature errors
+    "T0410" => "Argument {{index}} of function {{token}} does not match function signature",
+    "T0411" =>
+      "Context value is not a compatible type with argument {{index}} of function {{token}}",
+    "T0412" => "Argument {{index}} of function {{token}} must be an array of {{type}}",
+    "T1005" => "Attempted to invoke a non-function. Did you mean ${{token}}?",
+    "T1006" => "Attempted to invoke a non-function",
+    "D3001" => "Attempting to invoke string function on Infinity or NaN",
+    "D3030" => "Unable to cast value to a number: {{value}}",
+    "D3060" => "The sqrt function cannot be applied to a negative number: {{value}}",
+    "D3061" =>
+      "The power function has resulted in a value that cannot be represented as a JSON number: base={{value}}, exponent={{exp}}",
+    "D3070" =>
+      "The single argument form of the sort function can only be applied to an array of strings or an array of numbers.  Use the second argument to specify a comparison function",
+    "D3137" => "{{message}}",
+    "D3141" => "{{message}}"
   }
 
   @type t :: %__MODULE__{

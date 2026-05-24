@@ -154,6 +154,26 @@ defmodule Jsonata.ConformanceTest do
       end
     end
 
+    # Non-temporal function groups fully covered by Phase 3 (no comparator/lambda).
+    @function_groups ~w(function-count function-max function-min function-abs
+                        function-floor function-ceil function-power function-sqrt function-length
+                        function-uppercase function-lowercase function-trim function-substring
+                        function-substringBefore function-substringAfter function-contains
+                        function-split function-join function-replace function-append
+                        function-reverse function-distinct function-merge function-encodeUrl
+                        function-encodeUrlComponent)
+
+    test "non-temporal, non-higher-order function groups pass at 100%" do
+      if Conformance.available?() do
+        for group <- @function_groups do
+          {pass, total} = group_score(group)
+          assert pass == total, "#{group}: #{pass}/#{total}"
+        end
+      else
+        :ok
+      end
+    end
+
     test "the broader structural groups stay above the evaluator-core baseline" do
       if Conformance.available?() do
         {pass, total} =

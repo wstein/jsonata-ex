@@ -9,7 +9,7 @@ defmodule Jsonata do
   `Jsonata.Tokenizer`, `Jsonata.Sequence`, `Jsonata.AST`, and `Jsonata.Value`.
   """
 
-  alias Jsonata.{Environment, Error, Evaluator, Parser}
+  alias Jsonata.{Environment, Error, Evaluator, Functions, Parser}
 
   @doc """
   Evaluates a JSONata `expression` against `input`, with optional variable
@@ -32,7 +32,8 @@ defmodule Jsonata do
   def evaluate(expression, input \\ :undefined, bindings \\ %{}) when is_binary(expression) do
     with {:ok, ast} <- Parser.parse(expression) do
       env =
-        Enum.reduce(bindings, Environment.root(input), fn {name, value}, env ->
+        bindings
+        |> Enum.reduce(Functions.bind_all(Environment.root(input)), fn {name, value}, env ->
           Environment.bind(env, name, value)
         end)
 
