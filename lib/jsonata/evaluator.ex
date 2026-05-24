@@ -12,8 +12,9 @@ defmodule Jsonata.Evaluator do
   conditionals, blocks, binds, array/object constructors, wildcards, descendants,
   variables (Phase 2); function invocation, lambdas with closures and
   self-recursion, the `~>` apply/compose operator, higher-order functions, regex
-  matchers, `$eval`, order-by `^`, grouping `{`, partial application `?`, and the
-  positional tuple-stream operators focus `@` / index `#` (Phases 3-4, 6). Not
+  matchers, `$eval`, order-by `^`, grouping `{`, partial application `?`, the
+  positional tuple-stream operators focus `@` / index `#`, and the parent
+  operator `%` (which reuses the tuple stream to bind ancestor contexts). Not
   yet evaluated: the transform `|` operator.
   """
 
@@ -59,6 +60,10 @@ defmodule Jsonata.Evaluator do
 
   defp eval_node(%{type: :unary} = expr, input, env), do: {evaluate_unary(expr, input, env), env}
   defp eval_node(%{type: :name} = expr, input, env), do: {lookup(input, expr.value), env}
+
+  defp eval_node(%{type: :parent, label: label}, _input, env),
+    do: {Environment.lookup(env, label), env}
+
   defp eval_node(%{type: :wildcard}, input, env), do: {evaluate_wildcard(input), env}
   defp eval_node(%{type: :descendant}, input, env), do: {evaluate_descendants(input), env}
 
@@ -271,7 +276,10 @@ defmodule Jsonata.Evaluator do
       if tuples == :none do
         {result, result}
       else
-        {if(Map.get(expr, :tuple, false), do: tuples, else: detuple(tuples)), tuples}
+        # a path carrying ancestry keeps its tuple stream (tagged) for the
+        # enclosing tuple step to merge; otherwise collapse to plain values
+        carried = %Sequence{items: tuples, tuple_stream: true}
+        {if(Map.get(expr, :tuple, false), do: carried, else: detuple(tuples)), tuples}
       end
 
     final = maybe_keep_singleton(expr, final)
@@ -516,13 +524,22 @@ defmodule Jsonata.Evaluator do
       @undefined ->
         []
 
+      # the step produced its own tuple stream (ancestry carried through a block);
+      # merge each inner tuple's bindings into this one rather than rebinding `@`
+      %Sequence{tuple_stream: true, items: inner} ->
+        Enum.map(inner, &Map.merge(tuple, &1))
+
       res ->
         res |> as_value_list() |> Enum.with_index() |> Enum.map(&output_tuple(tuple, step, &1))
     end
   end
 
   defp output_tuple(tuple, step, {value, index}),
-    do: tuple |> bind_step_value(step, value) |> with_index(step, index)
+    do: tuple |> bind_ancestor(step) |> bind_step_value(step, value) |> with_index(step, index)
+
+  # the parent operator binds this step's input context under the ancestor label
+  defp bind_ancestor(tuple, %{ancestor_label: label}), do: Map.put(tuple, label, tuple["@"])
+  defp bind_ancestor(tuple, _step), do: tuple
 
   defp bind_step_value(tuple, %{focus: focus}, value), do: Map.put(tuple, focus, value)
   defp bind_step_value(tuple, _step, value), do: Map.put(tuple, "@", value)

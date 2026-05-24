@@ -3,7 +3,7 @@
 A native Elixir port of [JSONata](https://jsonata.org/), the JSON query and
 transformation language. This is a clean-room reimplementation tracking the
 reference implementation [`jsonata-js`](https://github.com/jsonata-js/jsonata)
-v2.2.1, validated against its language-agnostic conformance suite (~92% of
+v2.2.1, validated against its language-agnostic conformance suite (~94% of
 specified cases pass; see the gaps below).
 
 ## Usage
@@ -35,8 +35,9 @@ result is `:undefined` (distinct from JSON `null`).
 Paths, predicates, all operators, ranges, conditionals, blocks, variable binds,
 array/object constructors, wildcards/descendants; ~50 built-in functions with
 signature validation; lambdas with closures and self-recursion; higher-order
-functions; regex matchers; order-by `^`, group-by `{`, and the positional
-tuple-stream operators focus `@` / index `#` (joins); `$eval` and host functions.
+functions; regex matchers; order-by `^`, group-by `{`, the positional
+tuple-stream operators focus `@` / index `#` (joins), and the parent operator
+`%`; `$eval` and host functions.
 `$formatInteger`/`$parseInteger` integer picture strings (decimal/grouping,
 `;o` ordinals, Roman numerals, letter sequences, and spelled-out words);
 `$formatNumber` (DecimalFormat — grouping, exponents, percent/per-mille, the
@@ -47,8 +48,8 @@ words, week numbers, and timezones).
 
 ## Not yet implemented
 
-- The **parent operator** `%`, the **transform** `|…|` operator, and
-  order-sensitive object key handling (`$keys`/`$spread`/`$each`).
+- The **transform** `|…|` operator and order-sensitive object key handling
+  (`$keys`/`$spread`/`$each`).
 - Minor picture-string edge cases: non-ASCII digit groups and integers ≥ 10⁴⁶
   spelled out as words.
 

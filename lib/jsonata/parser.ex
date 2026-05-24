@@ -9,12 +9,11 @@ defmodule Jsonata.Parser do
   Parser state is threaded functionally; lexical/syntactic problems raise
   `Jsonata.Error` and are caught at the `parse/1` boundary.
 
-  Scope: this build parses the expression grammar exercised by the Phase 1/2
-  conformance groups (paths, predicates, operators, conditionals, blocks,
-  binds, array/object constructors, ranges, functions, lambdas). Constructs
-  belonging to later phases — order-by `^`, grouping `{` (infix), focus `@`,
-  index `#`, parent `%` (prefix), and transform `|` — are not yet parsed and
-  raise `S0204`.
+  Scope: the full expression grammar — paths, predicates, operators,
+  conditionals, blocks, binds, array/object constructors, ranges, functions,
+  lambdas, order-by `^`, grouping `{`, focus `@`, index `#`, and the parent
+  operator `%` (with its slot/ancestry resolution). The transform `|…|` operator
+  is not yet parsed.
   """
 
   alias Jsonata.{Error, Token, Tokenizer}
@@ -68,7 +67,7 @@ defmodule Jsonata.Parser do
       raise Error, code: "S0201", position: state.tok.position, token: state.tok.value
     end
 
-    {:ok, process_ast(ast)}
+    {:ok, process_and_resolve(ast)}
   rescue
     error in Error -> {:error, error}
   end
@@ -152,6 +151,7 @@ defmodule Jsonata.Parser do
 
   defp nud(%{id: "*"} = t, state), do: {%{type: :wildcard, position: t.position}, state}
   defp nud(%{id: "**"} = t, state), do: {%{type: :descendant, position: t.position}, state}
+  defp nud(%{id: "%"} = t, state), do: {%{type: :parent, position: t.position}, state}
 
   # Block expression: ( e1 ; e2 ; ... )
   defp nud(%{id: "("} = t, state) do
@@ -419,11 +419,197 @@ defmodule Jsonata.Parser do
   defp signature_depth("<"), do: 1
   defp signature_depth(_other), do: 0
 
+  # --- parent operator (%) ancestry resolution ------------------------------
+  #
+  # `%` references the context of an ancestor step. The parser assigns each `%`
+  # a "slot" (label + level), then walks the enclosing path back `level` steps to
+  # find the step whose input context the `%` refers to; that step is tagged with
+  # an `:ancestor_label` and `:tuple`, so the evaluator's tuple stream binds the
+  # parent context under that label, which the `:parent` node then looks up.
+  # Slots are mutable, so they live in the process dictionary for one parse.
+
+  defp process_and_resolve(ast) do
+    Process.put(:jsonata_slots, %{})
+    Process.put(:jsonata_slot_count, 0)
+
+    try do
+      result = process_ast(ast)
+
+      if result.type == :parent or Map.has_key?(result, :seeking_parent) do
+        raise Error, code: "S0217", position: result.position, token: result.type
+      end
+
+      bake_slots(result)
+    after
+      Process.delete(:jsonata_slots)
+      Process.delete(:jsonata_slot_count)
+    end
+  end
+
+  # Bake the resolved slot labels into the AST before the slot store is cleared.
+  defp bake_slots(node) when is_map(node) and not is_struct(node) do
+    node |> Map.new(fn {k, v} -> {k, bake_slots(v)} end) |> bake_node()
+  end
+
+  defp bake_slots(list) when is_list(list), do: Enum.map(list, &bake_slots/1)
+  defp bake_slots(other), do: other
+
+  defp bake_node(node) do
+    node
+    |> rebind(:slot, :label)
+    |> rebind(:ancestor, :ancestor_label)
+    |> Map.delete(:seeking_parent)
+  end
+
+  defp rebind(node, from, to) do
+    case Map.fetch(node, from) do
+      {:ok, slot} -> node |> Map.put(to, get_slot(slot).label) |> Map.delete(from)
+      :error -> node
+    end
+  end
+
+  defp new_slot do
+    n = Process.get(:jsonata_slot_count)
+    Process.put(:jsonata_slot_count, n + 1)
+    put_slot(n, %{label: "!#{n}", level: 1, index: n})
+    n
+  end
+
+  defp get_slot(index), do: Map.fetch!(Process.get(:jsonata_slots), index)
+
+  defp put_slot(index, slot) do
+    Process.put(:jsonata_slots, Map.put(Process.get(:jsonata_slots), index, slot))
+    index
+  end
+
+  # Propagate a child's unresolved parent slots up to the enclosing result node.
+  defp push_ancestry(result, value) do
+    case seeking_slots(value) do
+      [] -> result
+      slots -> Map.update(result, :seeking_parent, slots, &(&1 ++ slots))
+    end
+  end
+
+  defp seeking_slots(%{type: :parent, slot: slot} = value),
+    do: Map.get(value, :seeking_parent, []) ++ [slot]
+
+  defp seeking_slots(value), do: Map.get(value, :seeking_parent, [])
+
+  # Walk a path's steps back to bind each pending slot to an ancestor step.
+  defp resolve_ancestry(%{steps: steps} = path) do
+    laststep = List.last(steps)
+    slots = Map.get(laststep, :seeking_parent, [])
+    slots = if laststep.type == :parent, do: slots ++ [laststep.slot], else: slots
+
+    {steps, bubbled} =
+      Enum.reduce(slots, {steps, []}, fn slot, {steps, bubbled} ->
+        walk_back(steps, length(steps) - 2, slot, bubbled)
+      end)
+
+    path = %{path | steps: steps}
+    if bubbled == [], do: path, else: Map.update(path, :seeking_parent, bubbled, &(&1 ++ bubbled))
+  end
+
+  defp walk_back(steps, index, slot, bubbled) do
+    cond do
+      get_slot(slot).level <= 0 ->
+        {steps, bubbled}
+
+      index < 0 ->
+        {steps, bubbled ++ [slot]}
+
+      true ->
+        {pos, next} = skip_focus(steps, index)
+        steps = List.replace_at(steps, pos, seek_parent(Enum.at(steps, pos), slot))
+        walk_back(steps, next, slot, bubbled)
+    end
+  end
+
+  # Contiguous focus-bound steps (from @) are skipped during the walk-back.
+  defp skip_focus(steps, index) do
+    if index > 0 and has_focus?(Enum.at(steps, index)) and has_focus?(Enum.at(steps, index - 1)),
+      do: skip_focus(steps, index - 1),
+      else: {index, index - 1}
+  end
+
+  defp has_focus?(step), do: Map.get(step, :focus) != nil
+
+  defp seek_parent(%{type: type} = node, slot) when type in [:name, :wildcard] do
+    %{level: level} = decrement = %{get_slot(slot) | level: get_slot(slot).level - 1}
+    put_slot(slot, decrement)
+    if level == 0, do: tag_ancestor(node, slot), else: node
+  end
+
+  defp seek_parent(%{type: :parent} = node, slot) do
+    put_slot(slot, %{get_slot(slot) | level: get_slot(slot).level + 1})
+    node
+  end
+
+  defp seek_parent(%{type: :block, expressions: []} = node, _slot), do: node
+
+  defp seek_parent(%{type: :block, expressions: exprs} = node, slot) do
+    # a bare name/wildcard must become a single-step path so the tuple machinery
+    # (which lives in path evaluation) can bind the ancestor when this runs
+    last = exprs |> List.last() |> ensure_path() |> seek_parent(slot)
+    %{node | expressions: List.replace_at(exprs, -1, last)} |> Map.put(:tuple, true)
+  end
+
+  defp seek_parent(%{type: :path, steps: steps} = node, slot) do
+    steps = seek_path_steps(steps, length(steps) - 1, slot, true)
+    %{node | steps: steps} |> Map.put(:tuple, true)
+  end
+
+  defp seek_parent(node, _slot),
+    do: raise(Error, code: "S0217", position: node.position, token: node.type)
+
+  defp ensure_path(%{type: type} = node) when type in [:name, :wildcard],
+    do: %{type: :path, steps: [node]}
+
+  defp ensure_path(node), do: node
+
+  # the last step is always sought; earlier steps only while the slot has levels
+  defp seek_path_steps(steps, index, _slot, _first?) when index < 0, do: steps
+
+  defp seek_path_steps(steps, index, slot, first?) do
+    if first? or get_slot(slot).level > 0 do
+      steps = List.replace_at(steps, index, seek_parent(Enum.at(steps, index), slot))
+      seek_path_steps(steps, index - 1, slot, false)
+    else
+      steps
+    end
+  end
+
+  # A predicate consumes one ancestry level (its implicit focus); level-1 slots
+  # resolve against the predicated step, the rest bubble up one level lighter.
+  defp resolve_predicate_slots(step, predicate) do
+    Enum.reduce(Map.get(predicate, :seeking_parent, []), step, fn slot, step ->
+      if get_slot(slot).level == 1 do
+        seek_parent(step, slot)
+      else
+        put_slot(slot, %{get_slot(slot) | level: get_slot(slot).level - 1})
+        step
+      end
+    end)
+  end
+
+  defp tag_ancestor(node, slot) do
+    case Map.get(node, :ancestor) do
+      nil -> :ok
+      existing -> put_slot(slot, %{get_slot(slot) | label: get_slot(existing).label})
+    end
+
+    node |> Map.put(:ancestor, slot) |> Map.put(:tuple, true)
+  end
+
   # --- process_ast: flatten paths and attach predicate stages ---------------
 
   defp process_ast(%{type: :binary, value: "."} = expr) do
     lstep = process_ast(expr.lhs)
     result = if lstep.type == :path, do: lstep, else: %{type: :path, steps: [lstep]}
+
+    result =
+      if lstep.type == :parent, do: Map.put(result, :seeking_parent, [lstep.slot]), else: result
+
     rest = process_ast(expr.rhs)
 
     steps =
@@ -441,38 +627,46 @@ defmodule Jsonata.Parser do
     steps = Enum.map(steps, &literal_step_to_name/1)
     result = %{result | steps: steps}
     result = flag_keep_singleton(result)
-    flag_cons_arrays(result)
+    result |> flag_cons_arrays() |> resolve_ancestry()
   end
 
   defp process_ast(%{type: :binary, value: "["} = expr) do
     result = process_ast(expr.lhs)
     {step, key} = predicate_target(result)
     predicate = process_ast(expr.rhs)
+    step = resolve_predicate_slots(step, predicate)
+    # a predicate on a step that carries ancestry runs as a tuple stage, so it
+    # filters the tuple stream (with `%` bound) rather than the plain value
+    key = if Map.get(step, :tuple), do: :stages, else: key
     filter = %{type: :filter, expr: predicate, position: expr.position}
     stages = Map.get(step, key, []) ++ [filter]
-    step = step |> Map.put(key, stages) |> transfer_keep_array(expr)
+    step = step |> Map.put(key, stages) |> transfer_keep_array(expr) |> push_ancestry(predicate)
     replace_last_step(result, step, key)
   end
 
   defp process_ast(%{type: :binary, value: ":="} = expr) do
-    %{
-      type: :bind,
-      lhs: process_ast(expr.lhs),
-      rhs: process_ast(expr.rhs),
-      position: expr.position
-    }
+    rhs = process_ast(expr.rhs)
+
+    push_ancestry(
+      %{type: :bind, lhs: process_ast(expr.lhs), rhs: rhs, position: expr.position},
+      rhs
+    )
   end
 
   # Order-by: append a sort step to the path.
   defp process_ast(%{type: :binary, value: "^"} = expr) do
     result = as_path(process_ast(expr.lhs))
 
-    terms =
-      Enum.map(expr.rhs, fn term ->
-        %{descending: term.descending, expression: process_ast(term.expression)}
+    {terms, sort_step} =
+      Enum.map_reduce(expr.rhs, %{type: :sort, position: expr.position}, fn term, sort_step ->
+        expression = process_ast(term.expression)
+
+        {%{descending: term.descending, expression: expression},
+         push_ancestry(sort_step, expression)}
       end)
 
-    %{result | steps: result.steps ++ [%{type: :sort, terms: terms, position: expr.position}]}
+    sort_step = Map.put(sort_step, :terms, terms)
+    resolve_ancestry(%{result | steps: result.steps ++ [sort_step]})
   end
 
   # Group-by: attach a grouping object to the step/path.
@@ -502,15 +696,22 @@ defmodule Jsonata.Parser do
   end
 
   defp process_ast(%{type: :binary} = expr) do
-    %{expr | lhs: process_ast(expr.lhs), rhs: process_ast(expr.rhs)}
+    lhs = process_ast(expr.lhs)
+    rhs = process_ast(expr.rhs)
+    %{expr | lhs: lhs, rhs: rhs} |> push_ancestry(lhs) |> push_ancestry(rhs)
   end
 
   defp process_ast(%{type: :unary, value: "["} = expr) do
-    %{expr | expressions: Enum.map(expr.expressions, &process_ast/1)}
+    items = Enum.map(expr.expressions, &process_ast/1)
+    Enum.reduce(items, %{expr | expressions: items}, &push_ancestry(&2, &1))
   end
 
   defp process_ast(%{type: :unary, value: "{"} = expr) do
-    %{expr | lhs: Enum.map(expr.lhs, fn [k, v] -> [process_ast(k), process_ast(v)] end)}
+    pairs = Enum.map(expr.lhs, fn [k, v] -> [process_ast(k), process_ast(v)] end)
+
+    Enum.reduce(pairs, %{expr | lhs: pairs}, fn [k, v], acc ->
+      acc |> push_ancestry(k) |> push_ancestry(v)
+    end)
   end
 
   defp process_ast(%{type: :unary, value: "-"} = expr) do
@@ -524,26 +725,36 @@ defmodule Jsonata.Parser do
   end
 
   defp process_ast(%{type: :block} = expr) do
-    %{expr | expressions: Enum.map(expr.expressions, &process_ast/1)}
+    parts = Enum.map(expr.expressions, &process_ast/1)
+    Enum.reduce(parts, %{expr | expressions: parts}, &push_ancestry(&2, &1))
   end
 
   defp process_ast(%{type: :condition} = expr) do
+    condition = process_ast(expr.condition)
+    then_branch = process_ast(expr.then)
+
     expr
-    |> Map.put(:condition, process_ast(expr.condition))
-    |> Map.put(:then, process_ast(expr.then))
+    |> Map.put(:condition, condition)
+    |> Map.put(:then, then_branch)
     |> maybe_process(:else)
+    |> push_ancestry(condition)
+    |> push_ancestry(then_branch)
+    |> push_ancestry_else()
   end
 
   defp process_ast(%{type: :coalesce} = expr) do
-    %{expr | lhs: process_ast(expr.lhs), rhs: process_ast(expr.rhs)}
+    lhs = process_ast(expr.lhs)
+    rhs = process_ast(expr.rhs)
+    %{expr | lhs: lhs, rhs: rhs} |> push_ancestry(lhs) |> push_ancestry(rhs)
   end
 
+  defp process_ast(%{type: :parent} = expr),
+    do: Map.put(expr, :slot, new_slot())
+
   defp process_ast(%{type: type} = expr) when type in [:function, :partial] do
-    %{
-      expr
-      | procedure: process_ast(expr.procedure),
-        arguments: Enum.map(expr.arguments, &process_ast/1)
-    }
+    args = Enum.map(expr.arguments, &process_ast/1)
+    result = %{expr | procedure: process_ast(expr.procedure), arguments: args}
+    Enum.reduce(args, result, &push_ancestry(&2, &1))
   end
 
   defp process_ast(%{type: :lambda} = expr), do: %{expr | body: process_ast(expr.body)}
@@ -556,6 +767,9 @@ defmodule Jsonata.Parser do
       :error -> expr
     end
   end
+
+  defp push_ancestry_else(%{else: else_branch} = expr), do: push_ancestry(expr, else_branch)
+  defp push_ancestry_else(expr), do: expr
 
   defp predicate_target(%{type: :path, steps: steps}), do: {List.last(steps), :stages}
   defp predicate_target(step), do: {step, :predicate}
