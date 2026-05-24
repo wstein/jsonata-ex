@@ -12,9 +12,9 @@ defmodule Jsonata.Evaluator do
   conditionals, blocks, binds, array/object constructors, wildcards, descendants,
   variables (Phase 2); function invocation, lambdas with closures and
   self-recursion, the `~>` apply/compose operator, higher-order functions, regex
-  matchers, `$eval`, order-by `^`, grouping `{`, and partial application `?`
-  (Phases 3-4, 6). Not yet evaluated: the transform `|` operator and the
-  positional tuple-stream operators focus `@` / index `#`.
+  matchers, `$eval`, order-by `^`, grouping `{`, partial application `?`, and the
+  positional tuple-stream operators focus `@` / index `#` (Phases 3-4, 6). Not
+  yet evaluated: the transform `|` operator.
   """
 
   alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
@@ -39,7 +39,7 @@ defmodule Jsonata.Evaluator do
 
   # Group-by on a non-path node is applied here; a path applies its own group.
   defp maybe_group(%{type: :path}, raw, _env), do: raw
-  defp maybe_group(%{group: group}, raw, env), do: group_by(group, raw, env)
+  defp maybe_group(%{group: group}, raw, env), do: group_by(group, raw, false, env)
   defp maybe_group(_expr, raw, _env), do: raw
 
   defp eval_val(expr, input, env) do
@@ -260,32 +260,50 @@ defmodule Jsonata.Evaluator do
   # --- paths ----------------------------------------------------------------
 
   defp evaluate_path(%{steps: steps} = expr, input, env) do
-    if Enum.any?(steps, &Map.get(&1, :tuple, false)) do
-      raise "tuple-stream operators (@ focus, # index) are not yet implemented"
-    end
-
     # The path input is a single context value (the data root or a single element
     # produced by a prior step/filter). A top-level array is therefore treated as
     # one context — the first step's lookup maps over it — matching JSONata's
-    # `outerWrapper` semantics. Within-path iteration happens in run_steps.
-    input_seq = Sequence.singleton(input)
-    result = run_steps(steps, 0, input_seq, env, length(steps))
-    result = maybe_keep_singleton(expr, result)
-    group_by(Map.get(expr, :group), result, env)
-  end
+    # `outerWrapper` semantics. `tuples` is `:none` outside tuple-stream mode (the
+    # `@`/`#` operators), otherwise the list of tuple-binding maps.
+    {result, tuples} = run_steps(steps, 0, Sequence.singleton(input), :none, env, length(steps))
 
-  defp run_steps([step | rest], index, input_seq, env, count) do
-    result =
-      if index == 0 and Map.get(step, :cons_array, false) do
-        eval_val(step, input_seq, env)
+    {final, group_source} =
+      if tuples == :none do
+        {result, result}
       else
-        evaluate_step(step, input_seq, env, index == count - 1)
+        {if(Map.get(expr, :tuple, false), do: tuples, else: detuple(tuples)), tuples}
       end
 
+    final = maybe_keep_singleton(expr, final)
+
+    case Map.get(expr, :group) do
+      nil -> final
+      group -> group_by(group, group_source, tuples != :none, env)
+    end
+  end
+
+  defp run_steps([], _index, result, tuples, _env, _count), do: {result, tuples}
+
+  defp run_steps([step | rest], index, input_seq, tuples, env, count) do
+    cond do
+      index == 0 and Map.get(step, :cons_array, false) ->
+        continue_steps(rest, index, eval_val(step, input_seq, env), tuples, env, count)
+
+      Map.get(step, :tuple, false) or tuples != :none ->
+        new_tuples = evaluate_tuple_step(step, input_seq, tuples, env)
+        run_steps(rest, index + 1, input_seq, new_tuples, env, count)
+
+      true ->
+        result = evaluate_step(step, input_seq, env, index == count - 1)
+        continue_steps(rest, index, result, tuples, env, count)
+    end
+  end
+
+  defp continue_steps(rest, index, result, tuples, env, count) do
     if rest == [] or empty_result?(result) do
-      result
+      {result, tuples}
     else
-      run_steps(rest, index + 1, result, env, count)
+      run_steps(rest, index + 1, result, tuples, env, count)
     end
   end
 
@@ -294,7 +312,12 @@ defmodule Jsonata.Evaluator do
   defp empty_result?(_other), do: false
 
   defp evaluate_step(%{type: :sort} = step, input, env, _last_step?) do
-    sorted = input |> Enum.to_list() |> sort_by_terms(step.terms, env) |> Sequence.from_value()
+    sorted =
+      input
+      |> Enum.to_list()
+      |> sort_by_terms(step.terms, fn expr, item -> eval_val(expr, item, env) end)
+      |> Sequence.from_value()
+
     apply_stages(sorted, Map.get(step, :stages, []), env)
   end
 
@@ -336,17 +359,17 @@ defmodule Jsonata.Evaluator do
 
   # --- order-by (^) ---------------------------------------------------------
 
-  # Stable sort by the order-by terms; ties fall through to the next term.
-  defp sort_by_terms(list, terms, env),
-    do: Enum.sort(list, fn a, b -> sort_compare(a, b, terms, env) <= 0 end)
+  # Stable sort by the order-by terms; `value_fn` evaluates a term against an
+  # item (plain value or tuple). Ties fall through to the next term.
+  defp sort_by_terms(list, terms, value_fn),
+    do: Enum.sort(list, fn a, b -> sort_compare(a, b, terms, value_fn) <= 0 end)
 
-  defp sort_compare(_a, _b, [], _env), do: 0
+  defp sort_compare(_a, _b, [], _value_fn), do: 0
 
-  defp sort_compare(a, b, [term | rest], env) do
-    aa = eval_val(term.expression, a, env)
-    bb = eval_val(term.expression, b, env)
-    comp = if term.descending, do: -compare_terms(aa, bb), else: compare_terms(aa, bb)
-    if comp == 0, do: sort_compare(a, b, rest, env), else: comp
+  defp sort_compare(a, b, [term | rest], value_fn) do
+    raw = compare_terms(value_fn.(term.expression, a), value_fn.(term.expression, b))
+    comp = if term.descending, do: -raw, else: raw
+    if comp == 0, do: sort_compare(a, b, rest, value_fn), else: comp
   end
 
   defp compare_terms(@undefined, @undefined), do: 0
@@ -371,9 +394,10 @@ defmodule Jsonata.Evaluator do
 
   # --- group-by ({) ---------------------------------------------------------
 
-  defp group_by(nil, result, _env), do: result
+  defp group_by(%{lhs: pairs}, source, false, env), do: group_plain(pairs, source, env)
+  defp group_by(%{lhs: pairs}, tuples, true, env), do: group_tuples(pairs, tuples, env)
 
-  defp group_by(%{lhs: pairs}, result, env) do
+  defp group_plain(pairs, result, env) do
     items =
       case result do
         @undefined -> [@undefined]
@@ -396,6 +420,47 @@ defmodule Jsonata.Evaluator do
       end
     end)
   end
+
+  # Group a tuple stream: key/value expressions evaluate in each tuple's frame,
+  # and grouped tuples are reduced (each binding appended) before the value runs.
+  defp group_tuples(pairs, tuples, env) do
+    indexed = Enum.with_index(pairs)
+
+    {groups, order} =
+      Enum.reduce(tuples, {%{}, []}, fn tuple, acc ->
+        frame = frame_from_tuple(env, tuple)
+
+        Enum.reduce(indexed, acc, fn {[key_ast, _value], index}, {groups, order} ->
+          key = eval_val(key_ast, tuple["@"], frame)
+          add_tuple_group(key, tuple, index, groups, order)
+        end)
+      end)
+
+    Enum.reduce(order, %{}, fn key, acc ->
+      {data_tuples, index} = Map.fetch!(groups, key)
+      [_key_ast, value_ast] = Enum.at(pairs, index)
+      reduced = reduce_tuples(data_tuples)
+      frame = frame_from_tuple(env, reduced)
+
+      case eval_val(value_ast, reduced["@"], frame) do
+        @undefined -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp add_tuple_group(@undefined, _tuple, _index, groups, order), do: {groups, order}
+
+  defp add_tuple_group(key, tuple, index, groups, order) when is_binary(key) do
+    case Map.get(groups, key) do
+      nil -> {Map.put(groups, key, {[tuple], index}), order ++ [key]}
+      {tuples, ^index} -> {Map.put(groups, key, {tuples ++ [tuple], index}), order}
+      {_tuples, _other} -> raise Error.new("D1009", value: key)
+    end
+  end
+
+  defp add_tuple_group(key, _tuple, _index, _groups, _order),
+    do: raise(Error.new("T1003", value: key))
 
   defp build_groups(items, pairs, env) do
     indexed_pairs = Enum.with_index(pairs)
@@ -422,6 +487,76 @@ defmodule Jsonata.Evaluator do
 
   defp append_data(data, item) when is_list(data), do: data ++ [item]
   defp append_data(data, item), do: [data, item]
+
+  # --- tuple streams (@ focus, # index) -------------------------------------
+
+  # A tuple is a map `%{"@" => context, var => binding, ...}`. `@` binds a
+  # variable while keeping the context (a cross-join); `#` advances the context
+  # and binds a position. The first tuple step seeds tuples from the input.
+  # (A sort step only reaches here once already in tuple mode — i.e. `tuples`
+  # is a list — because outside tuple mode it is handled by evaluate_step/4.)
+  defp evaluate_tuple_step(%{type: :sort} = step, _input_seq, tuples, env) do
+    value_fn = fn expr, tuple -> eval_val(expr, tuple["@"], frame_from_tuple(env, tuple)) end
+    apply_tuple_stages(step, sort_by_terms(tuples, step.terms, value_fn), env)
+  end
+
+  defp evaluate_tuple_step(step, input_seq, tuples, env) do
+    bindings =
+      case tuples do
+        :none -> input_seq |> Enum.to_list() |> Enum.map(&%{"@" => &1})
+        list -> list
+      end
+
+    result = Enum.flat_map(bindings, &expand_tuple(step, &1, env))
+    apply_tuple_stages(step, result, env)
+  end
+
+  defp expand_tuple(step, tuple, env) do
+    case eval_val(step, tuple["@"], frame_from_tuple(env, tuple)) do
+      @undefined ->
+        []
+
+      res ->
+        res |> as_value_list() |> Enum.with_index() |> Enum.map(&output_tuple(tuple, step, &1))
+    end
+  end
+
+  defp output_tuple(tuple, step, {value, index}),
+    do: tuple |> bind_step_value(step, value) |> with_index(step, index)
+
+  defp bind_step_value(tuple, %{focus: focus}, value), do: Map.put(tuple, focus, value)
+  defp bind_step_value(tuple, _step, value), do: Map.put(tuple, "@", value)
+
+  defp with_index(tuple, %{index: index}, position), do: Map.put(tuple, index, position)
+  defp with_index(tuple, _step, _position), do: tuple
+
+  defp as_value_list(%Sequence{} = seq), do: Enum.to_list(seq)
+  defp as_value_list(value) when is_list(value), do: value
+  defp as_value_list(value), do: [value]
+
+  defp frame_from_tuple(env, tuple),
+    do: Enum.reduce(tuple, Environment.child(env), fn {k, v}, e -> Environment.bind(e, k, v) end)
+
+  defp detuple(tuples), do: tuples |> Enum.map(&Map.get(&1, "@")) |> Sequence.from_value()
+
+  defp reduce_tuples([first | rest]) do
+    Enum.reduce(rest, first, fn tuple, acc ->
+      Enum.reduce(tuple, acc, fn {key, value}, a ->
+        Map.update(a, key, value, &append_data(&1, value))
+      end)
+    end)
+  end
+
+  defp apply_tuple_stages(step, tuples, env),
+    do: Enum.reduce(Map.get(step, :stages, []), tuples, &apply_tuple_stage(&1, &2, env))
+
+  defp apply_tuple_stage(%{type: :filter, expr: predicate}, tuples, env) do
+    count = length(tuples)
+
+    for {tuple, index} <- Enum.with_index(tuples),
+        keep_item?(eval_val(predicate, tuple["@"], frame_from_tuple(env, tuple)), index, count),
+        do: tuple
+  end
 
   # --- predicates / stages --------------------------------------------------
 

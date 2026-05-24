@@ -275,10 +275,29 @@ defmodule Jsonata.EvaluatorTest do
                })
     end
 
-    test "tuple-stream operators (@ / #) are not yet implemented" do
-      assert_raise RuntimeError, ~r/tuple-stream/, fn ->
-        Jsonata.evaluate("a@$x.b", %{"a" => [%{"b" => 1}]})
-      end
+    test "focus (@) cross-joins and binds a variable" do
+      data = %{
+        "L" => [%{"id" => 1, "v" => "a"}, %{"id" => 2, "v" => "b"}],
+        "R" => [%{"lid" => 1, "n" => "x"}, %{"lid" => 1, "n" => "y"}, %{"lid" => 2, "n" => "z"}]
+      }
+
+      assert eval("L@$l.R@$r[$r.lid = $l.id]{ $l.v: $r.n }", data) ==
+               %{"a" => ["x", "y"], "b" => "z"}
+    end
+
+    test "index (#) binds a position and advances the context" do
+      assert eval("a#$i.{ 'pos': $i, 'val': $ }", %{"a" => [10, 20]}) ==
+               [%{"pos" => 0, "val" => 10}, %{"pos" => 1, "val" => 20}]
+    end
+
+    test "order-by within a tuple stream uses the bound variables" do
+      data = %{"item" => [%{"id" => 2}, %{"id" => 1}, %{"id" => 3}]}
+      assert eval("item@$i^($i.id).$i.id", data) == [1, 2, 3]
+    end
+
+    test "a join with no matches yields nothing" do
+      data = %{"L" => [%{"id" => 1}], "R" => [%{"lid" => 9}]}
+      assert eval("L@$l.R@$r[$r.lid = $l.id].$r", data) == :undefined
     end
   end
 end
