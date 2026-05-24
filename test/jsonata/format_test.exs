@@ -20,6 +20,11 @@ defmodule Jsonata.FormatTest do
     result
   end
 
+  defp fnum(expr) do
+    {:ok, result} = Jsonata.evaluate(expr)
+    result
+  end
+
   describe "decimal pictures" do
     test "plain and zero-padded" do
       assert fmt(123, "0") == "123"
@@ -131,6 +136,47 @@ defmodule Jsonata.FormatTest do
 
     test "undefined input yields undefined" do
       assert {:ok, :undefined} = Jsonata.evaluate("$parseInteger(nothing, '0')", %{})
+    end
+  end
+
+  describe "$formatNumber" do
+    test "grouping, padding, and decimals" do
+      assert fnum("$formatNumber(12345.6, '#,###.00')") == "12,345.60"
+      assert fnum("$formatNumber(1234.5678, '#,##0.00')") == "1,234.57"
+      assert fnum("$formatNumber(1230000, '#,###')") == "1,230,000"
+      assert fnum("$formatNumber(-6, '000')") == "-006"
+      assert fnum("$formatNumber(0.1, '#.##')") == ".1"
+    end
+
+    test "scientific notation" do
+      assert fnum("$formatNumber(1234.5678, '00.000e0')") == "12.346e2"
+      assert fnum("$formatNumber(1, '0.0e0')") == "1.0e0"
+      assert fnum("$formatNumber(1234.5678, '#0.000e0')") == "1.235e3"
+    end
+
+    test "percent and per-mille scaling" do
+      assert fnum("$formatNumber(0.14, '01%')") == "14%"
+      assert fnum("$formatNumber(0.14, '###0.0%')") == "14.0%"
+    end
+
+    test "positive;negative sub-picture pair with banker's rounding" do
+      assert fnum("$formatNumber(34.555, '#0.00;(#0.00)')") == "34.56"
+      assert fnum("$formatNumber(-34.555, '#0.00;(#0.00)')") == "(34.56)"
+    end
+
+    test "options object overrides the formatting symbols" do
+      assert fnum(
+               ~s|$formatNumber(1234.5, '#.##0,00', {"grouping-separator": ".", "decimal-separator": ","})|
+             ) ==
+               "1.234,50"
+    end
+
+    test "an over-long picture raises D3080" do
+      assert {:error, %Error{code: "D3080"}} = Jsonata.evaluate("$formatNumber(1, '0;0;0')")
+    end
+
+    test "undefined input yields undefined" do
+      assert {:ok, :undefined} = Jsonata.evaluate("$formatNumber(nothing, '0')", %{})
     end
   end
 end

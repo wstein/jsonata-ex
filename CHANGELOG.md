@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 A native Elixir port of [JSONata](https://jsonata.org/) v2.2.1, validated against
-the upstream language-agnostic conformance suite (~80% of specified cases pass).
+the upstream language-agnostic conformance suite (~82% of specified cases pass).
 
 ### Added
 
@@ -30,7 +30,10 @@ the upstream language-agnostic conformance suite (~80% of specified cases pass).
   decimal patterns with regular and irregular grouping separators, the `;o`
   ordinal modifier, Roman numerals (`i`/`I`), letter sequences (`a`/`A`), and
   spelled-out words (`w`/`W`/`Ww`). Non-ASCII digit groups and numbers ≥ 10⁴⁶ are
-  not yet supported.
+  not yet supported. `$formatNumber` (`Jsonata.FormatNumber`): the full XPath F&O
+  DecimalFormat — grouping (regular/irregular), exponent notation, percent and
+  per-mille scaling, the positive;negative sub-picture pair, a `properties`
+  options object, and `D3080`–`D3093` picture validation.
 - **`$string`** — ECMAScript-compatible number formatting (`1e21` → `"1e+21"`,
   `1e-7` → `"1e-7"`, `1e-6` → `"0.000001"`), 15-significant-digit rounding of
   non-integers (`22/7` → `"3.14285714285714"`), functions serialized as `""`, and
@@ -43,8 +46,7 @@ the upstream language-agnostic conformance suite (~80% of specified cases pass).
 
 ### Not yet implemented
 
-- Date/time and numeric **picture strings** (`$formatNumber`, picture-string
-  `$fromMillis`/`$toMillis`).
+- Date/time **picture strings** (picture-string `$fromMillis`/`$toMillis`).
 - The **parent operator** `%`, the **transform** `|…|` operator, and
   order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 - JavaScript-style **async** functions (out of scope for the synchronous engine).

@@ -7,11 +7,12 @@ defmodule Jsonata.Functions do
   functions; the regex matchers (`$match` and the regex forms of `$contains`/
   `$split`/`$replace`); higher-order functions (`$map`, `$filter`, `$reduce`,
   `$single`, `$sift`, `$each`, comparator `$sort`); the non-picture date/time
-  functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`); and the
-  integer picture strings `$formatInteger`/`$parseInteger` (`Jsonata.Format`).
+  functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`); the
+  integer picture strings `$formatInteger`/`$parseInteger` (`Jsonata.Format`); and
+  `$formatNumber` (DecimalFormat — `Jsonata.FormatNumber`).
 
-  `$formatNumber` (DecimalFormat), date/time picture strings, and the `$match`
-  custom-matcher protocol are not yet implemented.
+  Date/time picture strings and the `$match` custom-matcher protocol are not yet
+  implemented.
   """
 
   alias Jsonata.{Environment, Error, Function, Sequence, Signature, Value}
@@ -83,6 +84,7 @@ defmodule Jsonata.Functions do
        fn [value, picture] -> Jsonata.Format.format_integer(value, picture) end},
       {"parseInteger", "<s-s:n>",
        fn [value, picture] -> Jsonata.Format.parse_integer(value, picture) end},
+      {"formatNumber", "<n-so?:s>", &format_number/1},
       # --- date/time (Phase 5; date/time picture strings deferred) ---
       {"fromMillis", "<n-s?s?:s>", &Jsonata.DateTime.from_millis/1},
       {"toMillis", "<s-s?:n>", &Jsonata.DateTime.to_millis/1},
@@ -331,6 +333,14 @@ defmodule Jsonata.Functions do
 
     value |> round() |> Integer.to_string(radix) |> String.downcase()
   end
+
+  defp format_number([@undefined | _]), do: @undefined
+
+  defp format_number([value, picture]),
+    do: Jsonata.FormatNumber.format_number(value, picture, @undefined)
+
+  defp format_number([value, picture, options]),
+    do: Jsonata.FormatNumber.format_number(value, picture, options)
 
   # --- string ---------------------------------------------------------------
 

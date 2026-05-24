@@ -63,6 +63,32 @@ defmodule Jsonata.Error do
       "The power function has resulted in a value that cannot be represented as a JSON number: base={{value}}, exponent={{exp}}",
     "D3070" =>
       "The single argument form of the sort function can only be applied to an array of strings or an array of numbers.  Use the second argument to specify a comparison function",
+    "D3080" => "The picture string must only contain a maximum of two sub-pictures",
+    "D3081" =>
+      "The sub-picture must not contain more than one instance of the 'decimal-separator' character",
+    "D3082" =>
+      "The sub-picture must not contain more than one instance of the 'percent' character",
+    "D3083" =>
+      "The sub-picture must not contain more than one instance of the 'per-mille' character",
+    "D3084" => "The sub-picture must not contain both a 'percent' and a 'per-mille' character",
+    "D3085" =>
+      "The mantissa part of a sub-picture must contain at least one character that is either an 'optional digit character' or a member of the 'decimal digit family'",
+    "D3086" =>
+      "The sub-picture must not contain a passive character that is preceded by an active character and that is followed by another active character",
+    "D3087" =>
+      "The sub-picture must not contain a 'grouping-separator' character that appears adjacent to a 'decimal-separator' character",
+    "D3088" =>
+      "The sub-picture must not contain a 'grouping-separator' at the end of the integer part",
+    "D3089" =>
+      "The sub-picture must not contain two adjacent instances of the 'grouping-separator' character",
+    "D3090" =>
+      "The integer part of the sub-picture must not contain a member of the 'decimal digit family' that is followed by an instance of the 'optional digit character'",
+    "D3091" =>
+      "The fractional part of the sub-picture must not contain an instance of the 'optional digit character' that is followed by a member of the 'decimal digit family'",
+    "D3092" =>
+      "A sub-picture that contains a 'percent' or 'per-mille' character must not contain a character treated as an 'exponent-separator'",
+    "D3093" =>
+      "The exponent part of the sub-picture must comprise only of one or more characters that are members of the 'decimal digit family'",
     "D3100" =>
       "The radix of the formatBase function must be between 2 and 36.  It was given {{value}}",
     "D3110" =>
