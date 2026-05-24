@@ -13,7 +13,12 @@ defmodule Jsonata.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       test_coverage: [threshold: 90],
-      dialyzer: [plt_add_apps: [:ex_unit], flags: [:error_handling, :extra_return]],
+      dialyzer: [
+        plt_add_apps: [:ex_unit],
+        plt_local_path: "priv/plts",
+        plt_core_path: "priv/plts",
+        flags: [:error_handling, :extra_return]
+      ],
       name: "JSONata",
       source_url: @source_url,
       description: "A native Elixir port of the JSONata query and transformation language.",

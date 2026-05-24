@@ -17,6 +17,9 @@ defmodule Jsonata.Functions do
 
   @undefined :undefined
 
+  # $error always raises (it has no normal return path) — this is intentional.
+  @dialyzer {:nowarn_function, error: 1}
+
   @doc """
   Merges the built-in functions into `env` (existing bindings win).
 
