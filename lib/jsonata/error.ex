@@ -59,6 +59,10 @@ defmodule Jsonata.Error do
       "The power function has resulted in a value that cannot be represented as a JSON number: base={{value}}, exponent={{exp}}",
     "D3070" =>
       "The single argument form of the sort function can only be applied to an array of strings or an array of numbers.  Use the second argument to specify a comparison function",
+    "D3100" =>
+      "The radix of the formatBase function must be between 2 and 36.  It was given {{value}}",
+    "D3110" =>
+      "The argument of the toMillis function must be an ISO 8601 formatted timestamp. Given {{value}}",
     "D3137" => "{{message}}",
     "D3141" => "{{message}}"
   }

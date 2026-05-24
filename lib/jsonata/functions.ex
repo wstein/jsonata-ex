@@ -52,6 +52,12 @@ defmodule Jsonata.Functions do
       {"round", "<n-n?:n>", &round_fn/1},
       {"power", "<n-n:n>", &power/1},
       {"sqrt", "<n-:n>", &sqrt/1},
+      {"formatBase", "<n-n?:s>", &format_base/1},
+      # --- date/time (Phase 5; picture strings deferred) ---
+      {"fromMillis", "<n-s?s?:s>", &Jsonata.DateTime.from_millis/1},
+      {"toMillis", "<s-s?:n>", &Jsonata.DateTime.to_millis/1},
+      {"now", "<s?s?:s>", &Jsonata.DateTime.now/1},
+      {"millis", "<:n>", &Jsonata.DateTime.millis/1},
       # --- string ---
       {"string", "<x-b?:s>", &string/1},
       {"length", "<s-:n>", fn args -> str1(args, &String.length/1) end},
@@ -280,6 +286,20 @@ defmodule Jsonata.Functions do
   defp sqrt([@undefined]), do: @undefined
   defp sqrt([value]) when value < 0, do: raise(Error.new("D3060", value: value))
   defp sqrt([value]), do: normalize_number(:math.sqrt(value))
+
+  defp format_base([@undefined | _]), do: @undefined
+  defp format_base([value]), do: format_base([value, 10])
+  defp format_base([value, :undefined]), do: format_base([value, 10])
+
+  defp format_base([value, radix]) do
+    radix = round(radix)
+
+    if radix < 2 or radix > 36 do
+      raise Error.new("D3100", value: radix)
+    end
+
+    value |> round() |> Integer.to_string(radix) |> String.downcase()
+  end
 
   # --- string ---------------------------------------------------------------
 
