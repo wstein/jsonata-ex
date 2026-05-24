@@ -232,4 +232,53 @@ defmodule Jsonata.EvaluatorTest do
       assert eval("($add := function($a, $b){$a + $b}; $add5 := $add(5, ?); $add5(10))") == 15
     end
   end
+
+  describe "order-by and group-by" do
+    @people [%{"name" => "Bob", "age" => 30}, %{"name" => "Sally", "age" => 20}]
+
+    test "order-by ascending and descending" do
+      assert eval("p^(age).name", %{"p" => @people}) == ["Sally", "Bob"]
+      assert eval("p^(>age).name", %{"p" => @people}) == ["Bob", "Sally"]
+    end
+
+    test "order-by then predicate" do
+      assert eval("$^(age)[0].name", @people) == "Sally"
+    end
+
+    test "order-by type mismatch raises T2007" do
+      assert {:error, %{code: "T2007"}} = Jsonata.evaluate("a^($)", %{"a" => [1, "x"]})
+    end
+
+    test "group-by produces an object keyed by the key expression" do
+      phones = [
+        %{"type" => "home", "n" => "1"},
+        %{"type" => "mobile", "n" => "2"},
+        %{"type" => "home", "n" => "3"}
+      ]
+
+      assert eval("p{type: n}", %{"p" => phones}) == %{"home" => ["1", "3"], "mobile" => "2"}
+    end
+
+    test "object constructor drops keys whose value is nothing" do
+      assert eval(~s|{"a": 1, "b": ()}|) == %{"a" => 1}
+    end
+
+    test "explicit ascending marker and multi-term order-by" do
+      people = [%{"a" => 1, "b" => 2}, %{"a" => 1, "b" => 1}, %{"a" => 0, "b" => 9}]
+      assert eval("p^(<a, >b).b", %{"p" => people}) == [9, 2, 1]
+    end
+
+    test "group-by raises D1009 when two key expressions collide on a key" do
+      assert {:error, %{code: "D1009"}} =
+               Jsonata.evaluate("p{type: a, type: b}", %{
+                 "p" => [%{"type" => "x", "a" => 1, "b" => 2}]
+               })
+    end
+
+    test "tuple-stream operators (@ / #) are not yet implemented" do
+      assert_raise RuntimeError, ~r/tuple-stream/, fn ->
+        Jsonata.evaluate("a@$x.b", %{"a" => [%{"b" => 1}]})
+      end
+    end
+  end
 end

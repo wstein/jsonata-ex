@@ -12,9 +12,9 @@ defmodule Jsonata.Evaluator do
   conditionals, blocks, binds, array/object constructors, wildcards, descendants,
   variables (Phase 2); function invocation, lambdas with closures and
   self-recursion, the `~>` apply/compose operator, higher-order functions, regex
-  matchers, and `$eval` (Phases 3-4, 6). Not yet evaluated: the transform `|`
-  operator, order-by `^`, grouping `{`, focus `@` / index `#` (tuple streams),
-  and partial application `?`.
+  matchers, `$eval`, order-by `^`, grouping `{`, and partial application `?`
+  (Phases 3-4, 6). Not yet evaluated: the transform `|` operator and the
+  positional tuple-stream operators focus `@` / index `#`.
   """
 
   alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
@@ -33,8 +33,14 @@ defmodule Jsonata.Evaluator do
   defp eval(expr, input, env) do
     {raw, env} = eval_node(expr, input, env)
     raw = apply_predicates(expr, raw, env)
+    raw = maybe_group(expr, raw, env)
     {finalize(expr, raw), env}
   end
+
+  # Group-by on a non-path node is applied here; a path applies its own group.
+  defp maybe_group(%{type: :path}, raw, _env), do: raw
+  defp maybe_group(%{group: group}, raw, env), do: group_by(group, raw, env)
+  defp maybe_group(_expr, raw, _env), do: raw
 
   defp eval_val(expr, input, env) do
     {value, _env} = eval(expr, input, env)
@@ -254,13 +260,18 @@ defmodule Jsonata.Evaluator do
   # --- paths ----------------------------------------------------------------
 
   defp evaluate_path(%{steps: steps} = expr, input, env) do
+    if Enum.any?(steps, &Map.get(&1, :tuple, false)) do
+      raise "tuple-stream operators (@ focus, # index) are not yet implemented"
+    end
+
     # The path input is a single context value (the data root or a single element
     # produced by a prior step/filter). A top-level array is therefore treated as
     # one context — the first step's lookup maps over it — matching JSONata's
     # `outerWrapper` semantics. Within-path iteration happens in run_steps.
     input_seq = Sequence.singleton(input)
     result = run_steps(steps, 0, input_seq, env, length(steps))
-    maybe_keep_singleton(expr, result)
+    result = maybe_keep_singleton(expr, result)
+    group_by(Map.get(expr, :group), result, env)
   end
 
   defp run_steps([step | rest], index, input_seq, env, count) do
@@ -281,6 +292,11 @@ defmodule Jsonata.Evaluator do
   defp empty_result?(@undefined), do: true
   defp empty_result?(%Sequence{} = seq), do: Enum.empty?(seq)
   defp empty_result?(_other), do: false
+
+  defp evaluate_step(%{type: :sort} = step, input, env, _last_step?) do
+    sorted = input |> Enum.to_list() |> sort_by_terms(step.terms, env) |> Sequence.from_value()
+    apply_stages(sorted, Map.get(step, :stages, []), env)
+  end
 
   defp evaluate_step(step, input, env, last_step?) do
     results =
@@ -317,6 +333,95 @@ defmodule Jsonata.Evaluator do
     do: %{seq | keep_singleton: true}
 
   defp maybe_keep_singleton(_expr, result), do: result
+
+  # --- order-by (^) ---------------------------------------------------------
+
+  # Stable sort by the order-by terms; ties fall through to the next term.
+  defp sort_by_terms(list, terms, env),
+    do: Enum.sort(list, fn a, b -> sort_compare(a, b, terms, env) <= 0 end)
+
+  defp sort_compare(_a, _b, [], _env), do: 0
+
+  defp sort_compare(a, b, [term | rest], env) do
+    aa = eval_val(term.expression, a, env)
+    bb = eval_val(term.expression, b, env)
+    comp = if term.descending, do: -compare_terms(aa, bb), else: compare_terms(aa, bb)
+    if comp == 0, do: sort_compare(a, b, rest, env), else: comp
+  end
+
+  defp compare_terms(@undefined, @undefined), do: 0
+  defp compare_terms(@undefined, _bb), do: 1
+  defp compare_terms(_aa, @undefined), do: -1
+
+  defp compare_terms(aa, bb) do
+    cond do
+      not sortable?(aa) -> raise Error.new("T2008", value: aa)
+      not sortable?(bb) -> raise Error.new("T2008", value: bb)
+      not same_sort_type?(aa, bb) -> raise Error.new("T2007", value: aa, value2: bb)
+      aa == bb -> 0
+      aa < bb -> -1
+      true -> 1
+    end
+  end
+
+  defp sortable?(value), do: is_number(value) or is_binary(value)
+
+  defp same_sort_type?(aa, bb),
+    do: (is_number(aa) and is_number(bb)) or (is_binary(aa) and is_binary(bb))
+
+  # --- group-by ({) ---------------------------------------------------------
+
+  defp group_by(nil, result, _env), do: result
+
+  defp group_by(%{lhs: pairs}, result, env) do
+    items =
+      case result do
+        @undefined -> [@undefined]
+        %Sequence{} = seq -> Enum.to_list(seq)
+        list when is_list(list) -> list
+        value -> [value]
+      end
+
+    items = if items == [], do: [@undefined], else: items
+
+    {groups, order} = build_groups(items, pairs, env)
+
+    Enum.reduce(order, %{}, fn key, acc ->
+      {data, index} = Map.fetch!(groups, key)
+      [_key_ast, value_ast] = Enum.at(pairs, index)
+
+      case eval_val(value_ast, data, env) do
+        @undefined -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp build_groups(items, pairs, env) do
+    indexed_pairs = Enum.with_index(pairs)
+
+    Enum.reduce(items, {%{}, []}, fn item, acc ->
+      Enum.reduce(indexed_pairs, acc, fn {[key_ast, _value_ast], index}, {groups, order} ->
+        add_group_entry(eval_val(key_ast, item, env), item, index, groups, order)
+      end)
+    end)
+  end
+
+  defp add_group_entry(@undefined, _item, _index, groups, order), do: {groups, order}
+
+  defp add_group_entry(key, item, index, groups, order) when is_binary(key) do
+    case Map.get(groups, key) do
+      nil -> {Map.put(groups, key, {item, index}), order ++ [key]}
+      {data, ^index} -> {Map.put(groups, key, {append_data(data, item), index}), order}
+      {_data, _other} -> raise Error.new("D1009", value: key)
+    end
+  end
+
+  defp add_group_entry(key, _item, _index, _groups, _order),
+    do: raise(Error.new("T1003", value: key))
+
+  defp append_data(data, item) when is_list(data), do: data ++ [item]
+  defp append_data(data, item), do: [data, item]
 
   # --- predicates / stages --------------------------------------------------
 
@@ -607,7 +712,10 @@ defmodule Jsonata.Evaluator do
         acc
 
       key when is_binary(key) ->
-        Map.put(acc, key, eval_val(value_expr, item, env))
+        case eval_val(value_expr, item, env) do
+          @undefined -> acc
+          value -> Map.put(acc, key, value)
+        end
 
       key ->
         raise Error, code: "T1003", value: key, position: position

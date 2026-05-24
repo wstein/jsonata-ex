@@ -249,8 +249,52 @@ defmodule Jsonata.Parser do
     build_call(left, args, state, t.position)
   end
 
+  # Order-by:  left^( term, term, ... )   each term optionally prefixed by < or >
+  defp led(%{id: "^"} = t, left, state) do
+    state = advance(state, "(")
+    {terms, state} = sort_terms(state, [])
+    state = advance(state, ")")
+    {%{type: :binary, value: "^", lhs: left, rhs: terms, position: t.position}, state}
+  end
+
+  # Group-by:  left{ k: v, ... }
+  defp led(%{id: "{"} = t, left, state) do
+    {pairs, state} = object_pairs(state, [])
+    state = advance(state, "}", true)
+    {%{type: :binary, value: "{", lhs: left, rhs: pairs, position: t.position}, state}
+  end
+
+  # Focus (@) and index (#) variable binding; the RHS must be a variable.
+  defp led(%{id: id} = t, left, state) when id in ["@", "#"] do
+    {rhs, state} = expression(state, @lbp[id])
+
+    if rhs.type != :variable do
+      raise Error, code: "S0214", position: rhs.position, token: id
+    end
+
+    {%{type: :binary, value: id, lhs: left, rhs: rhs, position: t.position}, state}
+  end
+
   defp led(t, _left, _state),
     do: raise(Error, code: "S0204", position: t.position, token: t.value)
+
+  defp sort_terms(state, acc) do
+    {descending, state} =
+      case state.tok.id do
+        "<" -> {false, advance(state, "<")}
+        ">" -> {true, advance(state, ">")}
+        _other -> {false, state}
+      end
+
+    {expr, state} = expression(state, 0)
+    acc = [%{descending: descending, expression: expr} | acc]
+
+    if state.tok.id == "," do
+      sort_terms(advance(state, ","), acc)
+    else
+      {Enum.reverse(acc), state}
+    end
+  end
 
   # --- collection parsing helpers -------------------------------------------
 
@@ -419,6 +463,44 @@ defmodule Jsonata.Parser do
     }
   end
 
+  # Order-by: append a sort step to the path.
+  defp process_ast(%{type: :binary, value: "^"} = expr) do
+    result = as_path(process_ast(expr.lhs))
+
+    terms =
+      Enum.map(expr.rhs, fn term ->
+        %{descending: term.descending, expression: process_ast(term.expression)}
+      end)
+
+    %{result | steps: result.steps ++ [%{type: :sort, terms: terms, position: expr.position}]}
+  end
+
+  # Group-by: attach a grouping object to the step/path.
+  defp process_ast(%{type: :binary, value: "{"} = expr) do
+    result = process_ast(expr.lhs)
+
+    if Map.has_key?(result, :group) do
+      raise Error, code: "S0210", position: expr.position
+    end
+
+    pairs = Enum.map(expr.rhs, fn [k, v] -> [process_ast(k), process_ast(v)] end)
+    Map.put(result, :group, %{lhs: pairs, position: expr.position})
+  end
+
+  # Focus (@) / index (#) binding: flag the last step as a tuple step.
+  defp process_ast(%{type: :binary, value: bind_op} = expr) when bind_op in ["@", "#"] do
+    result = process_ast(expr.lhs)
+    {step, _key} = predicate_target(result)
+
+    if bind_op == "@" and (Map.has_key?(step, :stages) or Map.has_key?(step, :predicate)) do
+      raise Error, code: "S0215", position: expr.position
+    end
+
+    key = if bind_op == "@", do: :focus, else: :index
+    step = step |> Map.put(key, expr.rhs.value) |> Map.put(:tuple, true)
+    replace_last_step(result, step, :stages)
+  end
+
   defp process_ast(%{type: :binary} = expr) do
     %{expr | lhs: process_ast(expr.lhs), rhs: process_ast(expr.rhs)}
   end
@@ -477,6 +559,9 @@ defmodule Jsonata.Parser do
 
   defp predicate_target(%{type: :path, steps: steps}), do: {List.last(steps), :stages}
   defp predicate_target(step), do: {step, :predicate}
+
+  defp as_path(%{type: :path} = path), do: path
+  defp as_path(step), do: %{type: :path, steps: [step]}
 
   defp transfer_keep_array(step, %{keep_array: true}), do: Map.put(step, :keep_array, true)
   defp transfer_keep_array(step, _expr), do: step

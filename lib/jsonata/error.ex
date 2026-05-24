@@ -33,7 +33,11 @@ defmodule Jsonata.Error do
     "S0213" => "The literal value {{value}} cannot be used as a step within a path expression",
     # Dynamic / type (evaluation) errors
     "D1002" => "Cannot negate a non-numeric value: {{value}}",
+    "D1009" => "Multiple key definitions evaluate to same key: {{value}}",
     "T1003" => "Key in object structure must evaluate to a string; got: {{value}}",
+    "T2007" => "Type mismatch when comparing values {{value}} and {{value2}} in order-by clause",
+    "T2008" =>
+      "The expressions within an order-by clause must evaluate to numeric or string values",
     "T2001" => "The left side of the {{token}} operator must evaluate to a number",
     "T2002" => "The right side of the {{token}} operator must evaluate to a number",
     "T2003" => "The left side of the range operator (..) must evaluate to an integer",
