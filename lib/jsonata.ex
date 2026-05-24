@@ -4,7 +4,8 @@ defmodule Jsonata do
   transformation language.
 
   Evaluate an expression against data with `evaluate/3`, or `compile/1` it once
-  (or write it as a `~J` sigil) and reuse the compiled form across many inputs.
+  (or write it as a `~JSONATA` sigil) and reuse the compiled form across many
+  inputs.
 
   ## Examples
 
@@ -12,8 +13,8 @@ defmodule Jsonata do
       ...>   %{"Account" => %{"Order" => %{"Product" => %{"Price" => 10, "Quantity" => 3}}}})
       {:ok, 30}
 
-      iex> import Jsonata, only: [sigil_J: 2]
-      iex> Jsonata.evaluate(~J"a + b", %{"a" => 1, "b" => 2})
+      iex> import Jsonata, only: [sigil_JSONATA: 2]
+      iex> Jsonata.evaluate(~JSONATA"a + b", %{"a" => 1, "b" => 2})
       {:ok, 3}
 
   """
@@ -69,20 +70,22 @@ defmodule Jsonata do
   @doc ~S"""
   Compiles a literal JSONata expression at compile time.
 
-  `~J"expr"` expands to a `Jsonata.Expression` parsed during compilation, so the
-  expression is validated when the module compiles and never re-parsed at
+  `~JSONATA"expr"` expands to a `Jsonata.Expression` parsed during compilation, so
+  the expression is validated when the module compiles and never re-parsed at
   runtime. Interpolation is rejected (an injection guard); build dynamic
-  expressions with `compile/1` instead.
+  expressions with `compile/1` instead. `~J` is a short alias.
 
-      ~J"Account.Order[0].Price"
+      ~JSONATA"Account.Order[0].Price"
   """
-  defmacro sigil_J({:<<>>, _meta, [string]}, _modifiers) when is_binary(string),
+  defmacro sigil_JSONATA(term, _modifiers), do: compile_literal(term)
+
+  @doc "Short alias for `sigil_JSONATA/2` — `~J\"expr\"`."
+  defmacro sigil_J(term, _modifiers), do: compile_literal(term)
+
+  defp compile_literal({:<<>>, _meta, [string]}) when is_binary(string),
     do: compile_literal(string)
 
-  defmacro sigil_J(string, _modifiers) when is_binary(string),
-    do: compile_literal(string)
-
-  defp compile_literal(string) do
+  defp compile_literal(string) when is_binary(string) do
     case Parser.parse(string) do
       {:ok, ast} -> Macro.escape(%Expression{ast: ast, source: string})
       {:error, error} -> raise error

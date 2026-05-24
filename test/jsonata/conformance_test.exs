@@ -206,5 +206,35 @@ defmodule Jsonata.ConformanceTest do
         :ok
       end
     end
+
+    test "a produced JSONata error code always matches upstream" do
+      if Conformance.available?() do
+        mismatches =
+          for kase <- Conformance.load(),
+              match?({:error, code} when is_binary(code), kase.expected) do
+            {:error, expected} = kase.expected
+            {kase.expr, expected, error_code(kase)}
+          end
+          |> Enum.filter(fn {_expr, expected, actual} ->
+            is_binary(actual) and actual != expected
+          end)
+
+        assert mismatches == [], "wrong error codes: #{inspect(Enum.take(mismatches, 8))}"
+      else
+        :ok
+      end
+    end
+
+    # Error-expecting cases short-circuit quickly, so evaluating them is safe.
+    defp error_code(kase) do
+      case Jsonata.evaluate(kase.expr, Conformance.input(kase), kase.bindings) do
+        {:error, %{code: code}} -> code
+        _other -> :no_error
+      end
+    rescue
+      _ -> :crash
+    catch
+      _, _ -> :crash
+    end
   end
 end

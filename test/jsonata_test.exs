@@ -1,6 +1,6 @@
 defmodule JsonataTest do
   use ExUnit.Case, async: true
-  import Jsonata, only: [sigil_J: 2]
+  import Jsonata, only: [sigil_JSONATA: 2, sigil_J: 2]
   doctest Jsonata
 
   alias Jsonata.{Error, Expression}
@@ -21,9 +21,13 @@ defmodule JsonataTest do
     end
   end
 
-  describe "~J sigil" do
+  describe "~JSONATA sigil" do
     test "compiles a literal expression at compile time" do
-      assert Jsonata.evaluate(~J"$uppercase(name)", %{"name" => "bob"}) == {:ok, "BOB"}
+      assert Jsonata.evaluate(~JSONATA"$uppercase(name)", %{"name" => "bob"}) == {:ok, "BOB"}
+    end
+
+    test "~J is a short alias for ~JSONATA" do
+      assert Jsonata.evaluate(~J"a + b", %{"a" => 2, "b" => 3}) == {:ok, 5}
     end
   end
 
