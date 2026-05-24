@@ -1,6 +1,7 @@
 defmodule Jsonata.Format do
   @moduledoc """
-  Integer formatting for `$formatInteger` (ported from `datetime.js`).
+  Integer formatting and parsing for `$formatInteger`/`$parseInteger`
+  (ported from `datetime.js`).
 
   Supports the XPath F&O integer picture forms: decimal-digit patterns
   (`0`/`#`/grouping, with the `;o` ordinal modifier), Roman numerals (`i`/`I`),
@@ -30,6 +31,42 @@ defmodule Jsonata.Format do
     {1, "i"}
   ]
 
+  @roman_values %{?M => 1000, ?D => 500, ?C => 100, ?L => 50, ?X => 10, ?V => 5, ?I => 1}
+
+  # spelled-out word -> numeric value (lower-case keys), for $parseInteger
+  @word_values (
+                 cardinals =
+                   (@few ++ @ordinals)
+                   |> Enum.with_index()
+                   |> Map.new(fn {w, i} -> {String.downcase(w), rem(i, 20)} end)
+
+                 decades =
+                   @decades
+                   |> Enum.with_index()
+                   |> Enum.flat_map(fn {w, i} ->
+                     lw = String.downcase(w)
+                     value = (i + 2) * 10
+                     ieth = String.slice(lw, 0, String.length(lw) - 1) <> "ieth"
+                     [{lw, value}, {ieth, value}]
+                   end)
+                   |> Map.new()
+
+                 magnitudes =
+                   @magnitudes
+                   |> Enum.with_index()
+                   |> Enum.flat_map(fn {w, i} ->
+                     lw = String.downcase(w)
+                     value = trunc(:math.pow(10, (i + 1) * 3))
+                     [{lw, value}, {lw <> "th", value}]
+                   end)
+                   |> Map.new()
+
+                 cardinals
+                 |> Map.merge(decades)
+                 |> Map.put("hundredth", 100)
+                 |> Map.merge(magnitudes)
+               )
+
   @doc "Formats an integer `value` according to an XPath integer `picture`."
   @spec format_integer(term(), String.t()) :: term()
   def format_integer(:undefined, _picture), do: :undefined
@@ -39,6 +76,22 @@ defmodule Jsonata.Format do
     integer = if is_integer(value), do: value, else: value |> Float.floor() |> trunc()
     sign = if integer < 0, do: "-", else: ""
     sign <> format_value(abs(integer), format)
+  end
+
+  @doc "Parses a `value` string formatted per an XPath integer `picture` back to an integer."
+  @spec parse_integer(term(), String.t()) :: term()
+  def parse_integer(:undefined, _picture), do: :undefined
+
+  def parse_integer(value, picture), do: parse_value(value, analyse(picture))
+
+  defp parse_value(value, %{primary: :letters, case: :upper}), do: letters_to_decimal(value, ?A)
+  defp parse_value(value, %{primary: :letters, case: :lower}), do: letters_to_decimal(value, ?a)
+  defp parse_value(value, %{primary: :roman}), do: roman_to_decimal(String.upcase(value))
+  defp parse_value(value, %{primary: :words}), do: words_to_number(String.downcase(value))
+
+  defp parse_value(value, %{primary: :decimal} = format) do
+    digits = if format.ordinal, do: String.slice(value, 0..-3//1), else: value
+    digits |> strip_separators(format.grouping) |> String.to_integer()
   end
 
   # --- picture analysis -----------------------------------------------------
@@ -223,4 +276,54 @@ defmodule Jsonata.Format do
       true -> "th"
     end
   end
+
+  # --- parsing helpers ($parseInteger) --------------------------------------
+
+  defp strip_separators(digits, :none), do: digits
+
+  defp strip_separators(digits, {:regular, _interval, char}),
+    do: String.replace(digits, char, "")
+
+  defp strip_separators(digits, {:irregular, separators}) do
+    Enum.reduce(separators, digits, fn {_position, char}, acc ->
+      String.replace(acc, char, "")
+    end)
+  end
+
+  defp letters_to_decimal(letters, a_code) do
+    letters
+    |> String.to_charlist()
+    |> Enum.reverse()
+    |> Enum.with_index()
+    |> Enum.reduce(0, fn {code, i}, acc ->
+      acc + (code - a_code + 1) * trunc(:math.pow(26, i))
+    end)
+  end
+
+  # Walk right-to-left, subtracting any numeral smaller than the running maximum.
+  defp roman_to_decimal(roman) do
+    roman
+    |> String.to_charlist()
+    |> Enum.reverse()
+    |> Enum.reduce({0, 0}, fn code, {decimal, max} ->
+      value = Map.fetch!(@roman_values, code)
+      if value < max, do: {decimal - value, max}, else: {decimal + value, value}
+    end)
+    |> elem(0)
+  end
+
+  # Sum the word values into segments, multiplying a segment by a magnitude word.
+  defp words_to_number(text) do
+    text
+    |> String.split(~r/,\s|\sand\s|[\s\-]/)
+    |> Enum.map(&Map.fetch!(@word_values, &1))
+    |> Enum.reduce([0], &combine_word_value/2)
+    |> Enum.sum()
+  end
+
+  defp combine_word_value(value, [top | rest]) when value < 100 and top >= 1000,
+    do: [value, top | rest]
+
+  defp combine_word_value(value, [top | rest]) when value < 100, do: [top + value | rest]
+  defp combine_word_value(value, [top | rest]), do: [top * value | rest]
 end

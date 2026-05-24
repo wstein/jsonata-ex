@@ -15,6 +15,11 @@ defmodule Jsonata.FormatTest do
     error
   end
 
+  defp parse(value, picture) do
+    {:ok, result} = Jsonata.evaluate("$parseInteger(#{inspect(value)}, #{inspect(picture)})")
+    result
+  end
+
   describe "decimal pictures" do
     test "plain and zero-padded" do
       assert fmt(123, "0") == "123"
@@ -88,5 +93,44 @@ defmodule Jsonata.FormatTest do
 
   test "undefined input yields undefined" do
     assert {:ok, :undefined} = Jsonata.evaluate("$formatInteger(nothing, '0')", %{})
+  end
+
+  describe "$parseInteger" do
+    test "decimals with and without grouping" do
+      assert parse("123", "0") == 123
+      assert parse("1,234,567", "#,##0") == 1_234_567
+      assert parse("12345,67,890", "##,##,##0") == 1_234_567_890
+    end
+
+    test "ordinal decimals" do
+      assert parse("1st", "0;o") == 1
+      assert parse("21st", "0;o") == 21
+      assert parse("11th", "0;o") == 11
+    end
+
+    test "roman, letters, and words" do
+      assert parse("MMXXIV", "I") == 2024
+      assert parse("mmxxiv", "i") == 2024
+      assert parse("AA", "A") == 27
+      assert parse("one hundred and twenty-three", "w") == 123
+      assert parse("one thousand, two hundred and thirty-four", "w") == 1234
+    end
+
+    test "word ordinals" do
+      assert parse("first", "w;o") == 1
+      assert parse("twenty-first", "w;o") == 21
+      assert parse("one hundredth", "w;o") == 100
+    end
+
+    test "round-trips formatInteger" do
+      for {n, picture} <- [{42, "0"}, {1_234_567, "#,##0"}, {2024, "I"}, {27, "A"}, {321, "w"}] do
+        formatted = fmt(n, picture)
+        assert parse(formatted, picture) == n
+      end
+    end
+
+    test "undefined input yields undefined" do
+      assert {:ok, :undefined} = Jsonata.evaluate("$parseInteger(nothing, '0')", %{})
+    end
   end
 end
