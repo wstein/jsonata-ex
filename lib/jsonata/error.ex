@@ -17,33 +17,38 @@ defmodule Jsonata.Error do
     "S0105" => "Quoted property name must be terminated with a backquote (`)",
     "S0106" => "Comment has no closing tag",
     "S0301" => "Empty regular expressions are not allowed",
-    "S0302" => "No terminating / in regular expression"
+    "S0302" => "No terminating / in regular expression",
+    # Dynamic (evaluation) errors
+    "D2015" => "The maximum sequence length of {{value}} was exceeded."
   }
 
   @type t :: %__MODULE__{
           code: String.t(),
           position: non_neg_integer() | nil,
           token: String.t() | nil,
+          value: term(),
           message: String.t()
         }
 
-  defexception [:code, :position, :token, message: "JSONata error"]
+  defexception [:code, :position, :token, :value, message: "JSONata error"]
 
   @impl true
   @spec exception(keyword()) :: t()
   def exception(opts) when is_list(opts) do
     code = Keyword.fetch!(opts, :code)
-    token = opts |> Keyword.get(:token) |> normalize_token()
+    token = Keyword.get(opts, :token)
+    value = Keyword.get(opts, :value)
 
     %__MODULE__{
       code: code,
       position: Keyword.get(opts, :position),
       token: token,
-      message: render(code, token)
+      value: value,
+      message: render(code, token: token, value: value)
     }
   end
 
-  @doc "Builds an error struct for `code` with optional `:position` and `:token`."
+  @doc "Builds an error struct for `code` with optional `:position`, `:token`, and `:value`."
   @spec new(String.t(), keyword()) :: t()
   def new(code, opts \\ []), do: exception([{:code, code} | opts])
 
@@ -51,17 +56,12 @@ defmodule Jsonata.Error do
   @spec template(String.t()) :: String.t() | nil
   def template(code), do: Map.get(@messages, code)
 
-  defp normalize_token(nil), do: nil
-  defp normalize_token(token) when is_binary(token), do: token
-  defp normalize_token(token), do: to_string(token)
-
-  defp render(code, token) do
+  defp render(code, bindings) do
     template = Map.get(@messages, code, code)
 
-    if token do
-      String.replace(template, "{{token}}", token)
-    else
-      template
-    end
+    Enum.reduce(bindings, template, fn
+      {_key, nil}, acc -> acc
+      {key, val}, acc -> String.replace(acc, "{{#{key}}}", to_string(val))
+    end)
   end
 end
