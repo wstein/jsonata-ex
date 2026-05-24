@@ -1,18 +1,33 @@
 defmodule Jsonata.Function do
   @moduledoc """
-  A callable JSONata function value: a built-in (or, in later phases, a lambda).
+  A callable JSONata function value — a built-in, a user lambda, or a closure
+  wrapping one of those when passed as an argument to a higher-order function.
 
-  `impl` takes the validated argument list and returns a JSONata value. `signature`
-  is the parsed `Jsonata.Signature` used to validate and fix up arguments before
-  the implementation runs (`nil` for unsignatured functions).
+  Exactly one of the following shapes is populated:
+
+    * **built-in / closure** — `impl` takes the validated argument list and returns
+      a value.
+    * **lambda** — `params` (argument names), `body` (AST), and the captured
+      `env`/`input` of its definition site; applied by binding params to args in a
+      child of `env` and evaluating `body`.
+
+  `arity` is the declared argument count, used by higher-order functions to decide
+  how many of `(value, index, array)` to pass. `signature` (when present) validates
+  and fixes up arguments before application.
   """
 
-  @enforce_keys [:name, :impl]
-  defstruct [:name, :impl, :signature]
+  @enforce_keys [:name]
+  defstruct [:name, :impl, :signature, :params, :body, :env, :input, :self_name, arity: 0]
 
   @type t :: %__MODULE__{
           name: String.t(),
-          impl: ([term()] -> term()),
-          signature: Jsonata.Signature.t() | nil
+          impl: ([term()] -> term()) | nil,
+          signature: Jsonata.Signature.t() | nil,
+          params: [String.t()] | nil,
+          body: Jsonata.AST.t() | nil,
+          env: term() | nil,
+          input: term() | nil,
+          self_name: String.t() | nil,
+          arity: non_neg_integer()
         }
 end

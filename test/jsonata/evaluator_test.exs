@@ -201,11 +201,30 @@ defmodule Jsonata.EvaluatorTest do
     end
   end
 
-  describe "later phases" do
-    test "lambda evaluation is not yet implemented" do
-      assert_raise RuntimeError, ~r/later phase/, fn ->
-        Jsonata.evaluate("function($x){$x}(1)", %{})
-      end
+  describe "lambdas and higher-order functions" do
+    test "lambda definition and application" do
+      assert eval("function($x){$x * 2}(21)") == 42
+    end
+
+    test "closures capture their definition scope" do
+      assert eval("($n := 10; $add := function($x){$x + $n}; $add(5))") == 15
+    end
+
+    test "self-recursion via the bound name" do
+      assert eval("($f := function($x){$x <= 1 ? 1 : $x * $f($x - 1)}; $f(5))") == 120
+    end
+
+    test "map, filter, reduce, sort with comparator" do
+      assert eval("$map([1, 2, 3], function($x){$x * $x})") == [1, 4, 9]
+      assert eval("$filter([1, 2, 3, 4], function($x){$x > 2})") == [3, 4]
+      assert eval("$reduce([1, 2, 3, 4], function($a, $b){$a + $b})") == 10
+      assert eval("$sort([3, 1, 2], function($a, $b){$a > $b})") == [1, 2, 3]
+    end
+
+    test "built-in passed as a mapper, and ~> application and composition" do
+      assert eval(~s|$map(["a", "b"], $uppercase)|) == ["A", "B"]
+      assert eval("[1, 2, 3] ~> $sum()") == 6
+      assert eval(~s|($t := $trim ~> $uppercase; $t("  hi  "))|) == "HI"
     end
   end
 end

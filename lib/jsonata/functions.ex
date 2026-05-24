@@ -9,7 +9,7 @@ defmodule Jsonata.Functions do
   `$split`, and date/time functions are implemented in later phases.
   """
 
-  alias Jsonata.{Environment, Error, Function, Signature, Value}
+  alias Jsonata.{Environment, Error, Function, Sequence, Signature, Value}
 
   @undefined :undefined
 
@@ -17,9 +17,23 @@ defmodule Jsonata.Functions do
   @spec bind_all(Environment.t()) :: Environment.t()
   def bind_all(env) do
     Enum.reduce(registry(), env, fn {name, signature, impl}, acc ->
-      function = %Function{name: name, impl: impl, signature: Signature.parse(signature)}
+      parsed = Signature.parse(signature)
+
+      function = %Function{
+        name: name,
+        impl: impl,
+        signature: parsed,
+        arity: builtin_arity(parsed.params)
+      }
+
       Environment.bind(acc, name, function)
     end)
+  end
+
+  # The number of leading required parameters — used by higher-order functions to
+  # decide how many of (value, index, array) to pass (mirrors JS `function.length`).
+  defp builtin_arity(params) do
+    params |> Enum.take_while(&(not String.ends_with?(&1.regex, "?"))) |> length()
   end
 
   defp registry do
@@ -73,10 +87,123 @@ defmodule Jsonata.Functions do
       # --- boolean ---
       {"boolean", "<x-:b>", fn args -> bool1(args, fn b -> b end) end},
       {"not", "<x-:b>", &not_fn/1},
+      # --- higher-order (function arguments arrive as Jsonata.Function closures) ---
+      {"map", "<af>", &map/1},
+      {"filter", "<af>", &filter/1},
+      {"single", "<af?>", &single/1},
+      {"reduce", "<afj?:j>", &reduce/1},
+      {"sift", "<o-f?:o>", &sift/1},
+      {"each", "<o-f:a>", &each/1},
       # --- control ---
       {"error", "<s?:x>", &error/1},
       {"assert", "<bs?:x>", &assert/1}
     ]
+  end
+
+  # --- higher-order functions -----------------------------------------------
+
+  defp map([@undefined, _func]), do: @undefined
+
+  defp map([arr, func]) do
+    arr
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {item, index} ->
+      case call_hof(func, item, index, arr) do
+        @undefined -> []
+        result -> [result]
+      end
+    end)
+    |> Sequence.from_value()
+  end
+
+  defp filter([@undefined, _func]), do: @undefined
+
+  defp filter([arr, func]) do
+    arr
+    |> Enum.with_index()
+    |> Enum.filter(fn {item, index} -> jboolean(call_hof(func, item, index, arr)) end)
+    |> Enum.map(&elem(&1, 0))
+    |> Sequence.from_value()
+  end
+
+  defp single([@undefined | _]), do: @undefined
+  defp single([arr]), do: single([arr, nil])
+
+  defp single([arr, func]) do
+    matches =
+      arr
+      |> Enum.with_index()
+      |> Enum.filter(fn {item, index} ->
+        is_nil(func) or jboolean(call_hof(func, item, index, arr))
+      end)
+
+    case matches do
+      [{item, _index}] -> item
+      [] -> raise Error.new("D3139")
+      _many -> raise Error.new("D3138")
+    end
+  end
+
+  defp reduce([@undefined | _]), do: @undefined
+  defp reduce([seq, func]), do: reduce([seq, func, :undefined])
+
+  defp reduce([_seq, %Function{arity: arity}, _init]) when arity < 2,
+    do: raise(Error.new("D3050"))
+
+  defp reduce([[first | rest], func, :undefined]),
+    do: do_reduce(rest, func, first, 1, [first | rest])
+
+  defp reduce([seq, func, init]), do: do_reduce(seq, func, init, 0, seq)
+
+  defp do_reduce([], _func, acc, _index, _seq), do: acc
+
+  defp do_reduce([item | rest], func, acc, index, seq) do
+    do_reduce(
+      rest,
+      func,
+      func.impl.(reduce_args(func.arity, acc, item, index, seq)),
+      index + 1,
+      seq
+    )
+  end
+
+  defp reduce_args(arity, acc, item, index, seq) do
+    cond do
+      arity >= 4 -> [acc, item, index, seq]
+      arity >= 3 -> [acc, item, index]
+      true -> [acc, item]
+    end
+  end
+
+  defp sift([@undefined | _]), do: @undefined
+
+  defp sift([map, func]) when is_map(map) do
+    result =
+      map
+      |> Enum.filter(fn {key, value} -> jboolean(call_hof(func, value, key, map)) end)
+      |> Map.new()
+
+    if map_size(result) == 0, do: @undefined, else: result
+  end
+
+  defp each([@undefined | _]), do: @undefined
+
+  defp each([map, func]) when is_map(map) do
+    map
+    |> Enum.map(fn {key, value} -> call_hof(func, value, key, map) end)
+    |> Sequence.from_value()
+  end
+
+  # Applies a function closure with the right number of higher-order arguments.
+  defp call_hof(%Function{arity: arity, impl: impl}, item, index, collection),
+    do: impl.(hof_args(arity, item, index, collection))
+
+  defp hof_args(arity, item, index, collection) do
+    cond do
+      arity >= 3 -> [item, index, collection]
+      arity >= 2 -> [item, index]
+      true -> [item]
+    end
   end
 
   # --- aggregation ----------------------------------------------------------
@@ -280,8 +407,8 @@ defmodule Jsonata.Functions do
   defp sort([@undefined | _]), do: @undefined
   defp sort([list, :undefined]), do: sort([list])
 
-  defp sort([_list, _comparator]) do
-    raise "$sort with a comparator function is implemented in a later phase"
+  defp sort([list, %Function{} = comparator]) do
+    Enum.sort(list, fn a, b -> not jboolean(comparator.impl.([a, b])) end)
   end
 
   defp sort([list]) do

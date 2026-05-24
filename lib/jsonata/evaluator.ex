@@ -8,10 +8,12 @@ defmodule Jsonata.Evaluator do
   returns `{value, environment}` so that `:=` bindings in a block are visible to
   later expressions in the same scope. Errors raise `Jsonata.Error`.
 
-  Scope (Phase 2 / gate G2): paths and steps, predicates, all binary/unary
-  operators, ranges, conditionals, blocks, binds, array/object constructors,
-  wildcards, descendants, and variables. Functions and lambdas raise — they are
-  implemented in later phases.
+  Scope: paths/steps, predicates, all binary/unary operators, ranges,
+  conditionals, blocks, binds, array/object constructors, wildcards, descendants,
+  variables (Phase 2); function invocation, lambdas with closures and
+  self-recursion, the `~>` apply/compose operator, and higher-order functions
+  (Phases 3-4). Not yet evaluated: regex matchers, the transform `|` operator,
+  order-by `^`, grouping `{`, focus `@` / index `#`, and partial application `?`.
   """
 
   alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
@@ -42,6 +44,9 @@ defmodule Jsonata.Evaluator do
 
   defp eval_node(%{type: :path} = expr, input, env), do: {evaluate_path(expr, input, env), env}
 
+  defp eval_node(%{type: :binary, value: "~>"} = expr, input, env),
+    do: {evaluate_apply(expr, input, env), env}
+
   defp eval_node(%{type: :binary} = expr, input, env),
     do: {evaluate_binary(expr, input, env), env}
 
@@ -65,7 +70,7 @@ defmodule Jsonata.Evaluator do
     do: {expr.value, env}
 
   defp eval_node(%{type: :bind} = expr, input, env) do
-    value = eval_val(expr.rhs, input, env)
+    value = name_lambda(eval_val(expr.rhs, input, env), expr.lhs.value)
     {value, Environment.bind(env, expr.lhs.value, value)}
   end
 
@@ -81,27 +86,104 @@ defmodule Jsonata.Evaluator do
   end
 
   defp eval_node(%{type: :function} = expr, input, env),
-    do: {evaluate_function(expr, input, env), env}
+    do: {evaluate_function(expr, input, env, :none), env}
 
-  defp eval_node(%{type: :lambda}, _input, _env) do
-    raise "evaluation of lambda nodes is implemented in a later phase"
+  defp eval_node(%{type: :lambda} = expr, input, env), do: {make_lambda(expr, input, env), env}
+
+  defp make_lambda(expr, input, env) do
+    %Function{
+      name: "lambda",
+      params: Enum.map(expr.arguments, & &1.value),
+      body: expr.body,
+      env: env,
+      input: input,
+      arity: length(expr.arguments),
+      signature: lambda_signature(expr.signature)
+    }
   end
 
-  defp evaluate_function(expr, input, env) do
+  defp lambda_signature(nil), do: nil
+  defp lambda_signature(sig) when is_binary(sig), do: Signature.parse(sig)
+
+  # Records the bound name on a lambda so it can re-bind itself at application
+  # time, enabling self-recursion (`$f := function(...){ ... $f(...) }`).
+  defp name_lambda(%Function{body: body} = func, name) when not is_nil(body),
+    do: %{func | self_name: name}
+
+  defp name_lambda(value, _name), do: value
+
+  # `applyto` (the LHS of `~>`) is prepended to the argument list when present.
+  defp evaluate_function(expr, input, env, applyto) do
     proc = eval_val(expr.procedure, input, env)
-    args = Enum.map(expr.arguments, &eval_val(&1, input, env))
+    args = Enum.map(expr.arguments, fn arg -> wrap_argument(eval_val(arg, input, env), input) end)
+    args = if applyto == :none, do: args, else: [applyto | args]
     apply_function(proc, args, input, expr.position)
   end
 
-  defp apply_function(%Function{signature: nil} = func, args, _input, _position),
-    do: func.impl.(args)
+  # A function passed as an argument is wrapped as a closure so higher-order
+  # functions (in Jsonata.Functions) can apply it without depending on the evaluator.
+  defp wrap_argument(%Function{} = func, input) do
+    %Function{name: func.name, arity: func.arity, impl: &apply_function(func, &1, input, nil)}
+  end
 
-  defp apply_function(%Function{} = func, args, input, _position) do
-    func.impl.(Signature.validate(func.signature, args, input, func.name))
+  defp wrap_argument(value, _input), do: value
+
+  defp evaluate_apply(expr, input, env) do
+    lhs = eval_val(expr.lhs, input, env)
+
+    case expr.rhs do
+      %{type: :function} = call ->
+        evaluate_function(call, input, env, lhs)
+
+      rhs ->
+        func = eval_val(rhs, input, env)
+
+        # `f ~> g` with f a function is composition: λ($x){ g(f($x)) }.
+        if match?(%Function{}, lhs),
+          do: compose(lhs, func),
+          else: apply_function(func, [lhs], input, expr.position)
+    end
+  end
+
+  defp compose(%Function{} = f, %Function{} = g) do
+    %Function{
+      name: "composed",
+      arity: 1,
+      impl: fn args -> apply_function(g, [apply_function(f, args, nil, nil)], nil, nil) end
+    }
+  end
+
+  defp apply_function(%Function{impl: impl, signature: sig, name: name}, args, input, _position)
+       when not is_nil(impl) do
+    impl.(validate_args(sig, args, input, name))
+  end
+
+  defp apply_function(%Function{body: body, env: env} = func, args, _input, _position)
+       when not is_nil(body) do
+    validated = validate_args(func.signature, args, func.input, func.name)
+
+    base =
+      if func.self_name,
+        do: Environment.bind(Environment.child(env), func.self_name, func),
+        else: Environment.child(env)
+
+    frame =
+      func.params
+      |> Enum.with_index()
+      |> Enum.reduce(base, fn {param, index}, acc ->
+        Environment.bind(acc, param, Enum.at(validated, index, @undefined))
+      end)
+
+    evaluate(body, func.input, frame)
   end
 
   defp apply_function(_proc, _args, _input, position),
     do: raise(Error.new("T1006", position: position))
+
+  defp validate_args(nil, args, _input, _name), do: args
+
+  defp validate_args(signature, args, input, name),
+    do: Signature.validate(signature, args, input, name)
 
   # --- paths ----------------------------------------------------------------
 
