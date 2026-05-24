@@ -60,11 +60,9 @@ defmodule Jsonata.DateTimeTest do
     end
   end
 
-  describe "picture strings (deferred)" do
-    test "supplying a picture raises rather than returning a wrong result" do
-      assert_raise RuntimeError, ~r/picture/, fn ->
-        Jsonata.evaluate(~s|$fromMillis(0, "[Y]")|, :undefined)
-      end
+  describe "picture strings" do
+    test "$fromMillis formats with a picture (see DateTimePictureTest for breadth)" do
+      assert {:ok, "1970"} = Jsonata.evaluate(~s|$fromMillis(0, "[Y]")|, :undefined)
     end
   end
 end

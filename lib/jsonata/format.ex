@@ -84,6 +84,22 @@ defmodule Jsonata.Format do
 
   def parse_integer(value, picture), do: parse_value(value, analyse(picture))
 
+  @doc "Analyses an integer picture into a reusable spec (for `$formatInteger` and date/time)."
+  @spec analyse_integer(String.t()) :: map()
+  def analyse_integer(picture), do: analyse(picture)
+
+  @doc "Formats an integer `value` using a spec from `analyse_integer/1` (sign-aware)."
+  @spec format_spec(integer(), map()) :: String.t()
+  def format_spec(value, spec) do
+    sign = if value < 0, do: "-", else: ""
+    sign <> format_value(abs(value), spec)
+  end
+
+  @doc "Whether a spec's grouping separators are regularly spaced (vs. irregular/none)."
+  @spec regular?(map()) :: boolean()
+  def regular?(%{grouping: {:regular, _interval, _char}}), do: true
+  def regular?(_spec), do: false
+
   defp parse_value(value, %{primary: :letters, case: :upper}), do: letters_to_decimal(value, ?A)
   defp parse_value(value, %{primary: :letters, case: :lower}), do: letters_to_decimal(value, ?a)
   defp parse_value(value, %{primary: :roman}), do: roman_to_decimal(String.upcase(value))
@@ -121,7 +137,7 @@ defmodule Jsonata.Format do
   end
 
   defp analyse_decimal(picture, ordinal) do
-    {mandatory, _optional, separators} =
+    {mandatory, optional, separators} =
       picture
       |> String.to_charlist()
       |> Enum.reverse()
@@ -143,6 +159,7 @@ defmodule Jsonata.Format do
     %{
       primary: :decimal,
       mandatory_digits: mandatory,
+      optional_digits: optional,
       grouping: grouping(Enum.reverse(separators)),
       ordinal: ordinal
     }

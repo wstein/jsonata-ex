@@ -2,18 +2,17 @@ defmodule Jsonata.DateTime do
   @moduledoc """
   Date/time built-ins (Phase 5).
 
-  Implements the ISO 8601 default behaviour of `$fromMillis`/`$toMillis` plus
-  `$now`/`$millis`. The XPath/F&O **picture-string** formatting and parsing (a
-  second argument to these functions, and `$formatInteger`/`$parseInteger`) is a
-  large sub-system ported separately; supplying a picture currently raises so the
-  gap is explicit rather than silently wrong.
+  Implements `$fromMillis`/`$toMillis`/`$now`/`$millis`. ISO 8601 is the default;
+  picture-string **formatting** (`$fromMillis`/`$now`) is delegated to
+  `Jsonata.DateTimePicture`. Picture-string **parsing** (`$toMillis` with a
+  picture) is not yet implemented and raises so the gap is explicit.
   """
 
   alias Jsonata.Error
 
   @undefined :undefined
 
-  @doc "Milliseconds since the Unix epoch → ISO 8601 string (UTC)."
+  @doc "Milliseconds since the Unix epoch → ISO 8601 string (UTC), or a picture string."
   @spec from_millis([term()]) :: term()
   def from_millis([@undefined | _]), do: @undefined
 
@@ -21,8 +20,13 @@ defmodule Jsonata.DateTime do
     millis |> round() |> DateTime.from_unix!(:millisecond) |> DateTime.to_iso8601()
   end
 
-  def from_millis([millis, :undefined | _]), do: from_millis([millis])
-  def from_millis([_millis, _picture | _]), do: raise(picture_error())
+  def from_millis([millis, @undefined]), do: from_millis([millis])
+  def from_millis([millis, @undefined, @undefined]), do: from_millis([millis])
+
+  def from_millis([millis, picture]), do: from_millis([millis, picture, @undefined])
+
+  def from_millis([millis, picture, timezone]),
+    do: Jsonata.DateTimePicture.format(round(millis), picture, timezone)
 
   @doc "ISO 8601 string → milliseconds since the Unix epoch."
   @spec to_millis([term()]) :: term()
@@ -41,8 +45,9 @@ defmodule Jsonata.DateTime do
   @doc "The current time as an ISO 8601 string."
   @spec now([term()]) :: term()
   def now([]), do: from_millis([System.os_time(:millisecond)])
-  def now([:undefined | _]), do: now([])
-  def now([_picture | _]), do: raise(picture_error())
+  def now([picture]), do: now([picture, @undefined])
+  def now([@undefined, @undefined]), do: now([])
+  def now([picture, timezone]), do: from_millis([System.os_time(:millisecond), picture, timezone])
 
   @doc "The current time in milliseconds since the Unix epoch."
   @spec millis([term()]) :: integer()

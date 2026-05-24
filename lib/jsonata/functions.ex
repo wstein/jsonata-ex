@@ -6,13 +6,14 @@ defmodule Jsonata.Functions do
   Covers aggregation, numeric, string, array/object, boolean, and control
   functions; the regex matchers (`$match` and the regex forms of `$contains`/
   `$split`/`$replace`); higher-order functions (`$map`, `$filter`, `$reduce`,
-  `$single`, `$sift`, `$each`, comparator `$sort`); the non-picture date/time
-  functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`); the
-  integer picture strings `$formatInteger`/`$parseInteger` (`Jsonata.Format`); and
-  `$formatNumber` (DecimalFormat — `Jsonata.FormatNumber`).
+  `$single`, `$sift`, `$each`, comparator `$sort`); the date/time functions
+  (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`, plus date/time
+  picture-string formatting via `Jsonata.DateTimePicture`); the integer picture
+  strings `$formatInteger`/`$parseInteger` (`Jsonata.Format`); and `$formatNumber`
+  (DecimalFormat — `Jsonata.FormatNumber`).
 
-  Date/time picture strings and the `$match` custom-matcher protocol are not yet
-  implemented.
+  Date/time picture-string **parsing** (`$toMillis` with a picture) and the
+  `$match` custom-matcher protocol are not yet implemented.
   """
 
   alias Jsonata.{Environment, Error, Function, Sequence, Signature, Value}

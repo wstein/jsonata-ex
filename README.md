@@ -3,7 +3,7 @@
 A native Elixir port of [JSONata](https://jsonata.org/), the JSON query and
 transformation language. This is a clean-room reimplementation tracking the
 reference implementation [`jsonata-js`](https://github.com/jsonata-js/jsonata)
-v2.2.1, validated against its language-agnostic conformance suite (~82% of
+v2.2.1, validated against its language-agnostic conformance suite (~87% of
 specified cases pass; see the gaps below).
 
 ## Usage
@@ -38,15 +38,17 @@ signature validation; lambdas with closures and self-recursion; higher-order
 functions; regex matchers; order-by `^`, group-by `{`, and the positional
 tuple-stream operators focus `@` / index `#` (joins); `$eval` and host functions.
 `$formatInteger`/`$parseInteger` integer picture strings (decimal/grouping,
-`;o` ordinals, Roman numerals, letter sequences, and spelled-out words); and
+`;o` ordinals, Roman numerals, letter sequences, and spelled-out words);
 `$formatNumber` (DecimalFormat — grouping, exponents, percent/per-mille, the
-positive;negative pattern pair, and an options object).
+positive;negative pattern pair, and an options object); and date/time
+picture-string formatting (`$fromMillis`/`$now` — the `[Y0001]-[M01]-[D01]`
+component grammar with names, ordinals, week numbers, and timezones).
 
 ## Not yet implemented
 
-- Date/time **picture strings** (picture-string `$fromMillis`/`$toMillis`).
-  Integer/number picture strings are done except for non-ASCII digit groups and
-  numbers ≥ 10⁴⁶.
+- Date/time picture-string **parsing** (`$toMillis` with a picture). Date/time
+  *formatting* (`$fromMillis`/`$now`) and integer/number picture strings are
+  done, except for non-ASCII digit groups and numbers ≥ 10⁴⁶.
 - The **parent operator** `%`, the **transform** `|…|` operator, and
   order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 

@@ -93,6 +93,13 @@ defmodule Jsonata.Error do
       "The radix of the formatBase function must be between 2 and 36.  It was given {{value}}",
     "D3110" =>
       "The argument of the toMillis function must be an ISO 8601 formatted timestamp. Given {{value}}",
+    "D3132" => "Unknown component specifier {{value}} in date/time picture string",
+    "D3133" =>
+      "The 'name' modifier can only be applied to months and days in the date/time picture string, not {{value}}",
+    "D3134" => "The timezone integer format specifier cannot have more than four digits",
+    "D3135" => "No matching closing bracket ']' in date/time picture string",
+    "D3136" =>
+      "The date/time picture string is missing specifiers required to parse the timestamp",
     "D3137" => "{{message}}",
     "D3141" => "{{message}}"
   }
