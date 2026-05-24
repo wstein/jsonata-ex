@@ -18,6 +18,19 @@ defmodule Jsonata.Error do
     "S0106" => "Comment has no closing tag",
     "S0301" => "Empty regular expressions are not allowed",
     "S0302" => "No terminating / in regular expression",
+    # Syntax (parser) errors
+    "S0201" => "Syntax error: {{token}}",
+    "S0202" => "Expected {{value}}, got {{token}}",
+    "S0203" => "Expected {{value}} before end of expression",
+    "S0204" => "Unknown operator: {{token}}",
+    "S0205" => "Unexpected token: {{token}}",
+    "S0208" =>
+      "Parameter {{value}} of function definition must be a variable name (start with $)",
+    "S0209" => "A predicate cannot follow a grouping expression in a step",
+    "S0210" => "Each step can only have one grouping expression",
+    "S0211" => "The symbol {{token}} cannot be used as a unary operator",
+    "S0212" => "The left side of := must be a variable name (start with $)",
+    "S0213" => "The literal value {{value}} cannot be used as a step within a path expression",
     # Dynamic (evaluation) errors
     "D2015" => "The maximum sequence length of {{value}} was exceeded."
   }

@@ -75,6 +75,17 @@ defmodule Jsonata.ConformanceTest do
     end
   end
 
+  describe "load_group/2" do
+    test "loads a single group's cases" do
+      names = @fixtures |> Conformance.load_group("beta") |> Enum.map(& &1.name)
+      assert names == ["one"]
+    end
+
+    test "returns [] for an absent group" do
+      assert Conformance.load_group(@fixtures, "no-such-group") == []
+    end
+  end
+
   describe "dataset/2" do
     test "decodes a named dataset" do
       assert Conformance.dataset(@fixtures, "dataset0") == %{"hello" => "world"}

@@ -99,6 +99,24 @@ defmodule Jsonata.Conformance do
         do: {path, reason}
   end
 
+  @doc """
+  Loads the decodable cases for a single `group`, or `[]` if the group (or the
+  whole suite) is absent.
+  """
+  @spec load_group(String.t(), String.t()) :: [Case.t()]
+  def load_group(root \\ @default_root, group) do
+    dir = Path.join([root, "groups", group])
+
+    if File.dir?(dir) do
+      for path <- dir |> Path.join("*.json") |> Path.wildcard() |> Enum.sort(),
+          {:ok, decoded} <- [JSON.decode(File.read!(path))],
+          kase <- normalize(decoded, path, group, dir),
+          do: kase
+    else
+      []
+    end
+  end
+
   @doc "Loads and decodes a named dataset (without the `.json` extension)."
   @spec dataset(String.t(), String.t()) :: term()
   def dataset(root \\ @default_root, name) do
