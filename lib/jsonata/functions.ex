@@ -17,20 +17,38 @@ defmodule Jsonata.Functions do
 
   @undefined :undefined
 
-  @doc "Binds every built-in function into `env`."
+  @doc """
+  Merges the built-in functions into `env` (existing bindings win).
+
+  The built-in map — which requires parsing/compiling every signature — is built
+  once and cached in `:persistent_term`, so repeated `Jsonata.evaluate/3` calls
+  do not re-parse signatures.
+  """
   @spec bind_all(Environment.t()) :: Environment.t()
-  def bind_all(env) do
-    Enum.reduce(registry(), env, fn {name, signature, impl}, acc ->
+  def bind_all(%Environment{} = env) do
+    %{env | bindings: Map.merge(builtins(), env.bindings)}
+  end
+
+  @doc "The cached map of built-in name → `Jsonata.Function`."
+  @spec builtins() :: %{optional(String.t()) => Function.t()}
+  def builtins do
+    case :persistent_term.get({__MODULE__, :builtins}, nil) do
+      nil ->
+        map = build_builtins()
+        :persistent_term.put({__MODULE__, :builtins}, map)
+        map
+
+      map ->
+        map
+    end
+  end
+
+  defp build_builtins do
+    Map.new(registry(), fn {name, signature, impl} ->
       parsed = Signature.parse(signature)
 
-      function = %Function{
-        name: name,
-        impl: impl,
-        signature: parsed,
-        arity: builtin_arity(parsed.params)
-      }
-
-      Environment.bind(acc, name, function)
+      {name,
+       %Function{name: name, impl: impl, signature: parsed, arity: builtin_arity(parsed.params)}}
     end)
   end
 
