@@ -106,4 +106,24 @@ defmodule Jsonata.ParentOperatorTest do
   test "% is still the modulo operator in infix position" do
     assert {:ok, [0, 2, 4, 6, 8]} = Jsonata.evaluate("[0..9][$ % 2 = 0]")
   end
+
+  # The parser resolves `%` ancestry via per-parse process-dictionary slots
+  # (see Jsonata.Parser's moduledoc). This guards against those slots leaking
+  # across a nested parse that happens *during* evaluation of an outer
+  # `%`-expression — e.g. a host function that itself calls Jsonata.evaluate.
+  test "% survives a nested parse inside a host function (no slot-state clash)" do
+    reparse = fn ->
+      {:ok, result} =
+        Jsonata.evaluate("x.y.(%.tag)", %{"x" => %{"tag" => "X", "y" => %{"z" => 1}}})
+
+      result
+    end
+
+    assert {:ok, "A|X"} =
+             Jsonata.evaluate(
+               "a.b.(%.tag & \"|\" & $reparse())",
+               %{"a" => %{"tag" => "A", "b" => %{"z" => 1}}},
+               %{"reparse" => reparse}
+             )
+  end
 end

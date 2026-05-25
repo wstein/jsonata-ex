@@ -49,9 +49,39 @@ words, week numbers, and timezones).
 ## Not yet implemented
 
 - Order-sensitive object key handling (`$keys`/`$spread`/`$each`), which needs
-  an insertion-order-preserving object representation.
+  an insertion-order-preserving object representation (see below).
 - Minor picture-string edge cases: non-ASCII digit groups and integers ≥ 10⁴⁶
   spelled out as words.
+
+## Differences from jsonata-js
+
+These are deliberate, documented divergences from the reference implementation —
+not bugs. Most expressions are unaffected; the cases below are where an Elixir
+host and the JavaScript reference legitimately differ.
+
+- **Object key order is not preserved.** JSONata objects are decoded into plain
+  Elixir maps, which do not retain insertion order. So `$keys`, `$spread`,
+  `$each`, and multi-key `$string` serialization may emit keys in a different
+  (map-internal) order than jsonata-js. Object *values* and lookups are
+  unaffected; only the *ordering* of keys differs.
+- **Numbers are arbitrary-precision, not IEEE-754 doubles.** jsonata-js performs
+  all arithmetic in JavaScript doubles; this port keeps exact integers. So
+  `$factorial(100)` returns the exact 158-digit integer here, where jsonata-js
+  returns `9.33…e157`. Non-integer results still use floats and render with the
+  same ECMAScript rules (`1e21` → `"1e+21"`, 15-significant-digit `$string`
+  rounding). The divergence only shows for integer results beyond 2⁵³.
+- **Regex uses Erlang's `:re` (PCRE), not V8.** Patterns valid in both behave
+  identically, but engine-specific syntax, some named-group and flag handling,
+  and a few edge constructs differ between PCRE and V8.
+- **`~> | … |` transform matches by value, not reference.** jsonata-js mutates a
+  clone of the matched nodes by reference; the immutable port rebuilds the tree,
+  keying each match's update/delete by the matched node's *value*. Results are
+  identical unless two structurally-equal sibling objects are selected
+  positionally (e.g. `(a.b)[0]`) — then both equal nodes receive the update.
+
+The whole upstream conformance suite is run as a CI gate
+(`mix test --only conformance`); the current score is **~96.5%**, and the gaps
+above account for most of the remainder.
 
 ## Development
 

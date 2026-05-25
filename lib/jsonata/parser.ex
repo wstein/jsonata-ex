@@ -6,8 +6,17 @@ defmodule Jsonata.Parser do
   (`process_ast`) that flattens `.`/`[` chains into `:path` nodes with steps and
   predicate stages.
 
-  Parser state is threaded functionally; lexical/syntactic problems raise
-  `Jsonata.Error` and are caught at the `parse/1` boundary.
+  Parser state is threaded functionally, with one exception: the parent operator
+  `%` resolves its ancestry by mutating "slots" (label + level), which — to mirror
+  the reference's mutable algorithm — live in the **process dictionary** for the
+  duration of a single `parse/1` call (keys `:jsonata_slots`/`:jsonata_slot_count`,
+  always cleared in an `after`). This makes `process_and_resolve/1` rely on
+  per-process, single-pass state rather than a threaded accumulator. It is safe
+  because `parse/1` does not recurse into itself and re-entrancy across a `$eval`
+  boundary uses a fresh nested call that re-initialises and restores the slots;
+  it is, however, the one place the "threaded functionally" description does not
+  hold (tracked for a future accumulator-based refactor). Lexical/syntactic
+  problems raise `Jsonata.Error`, caught at the `parse/1` boundary.
 
   Scope: the full expression grammar — paths, predicates, operators,
   conditionals, blocks, binds, array/object constructors, ranges, functions,

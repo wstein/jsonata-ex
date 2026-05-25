@@ -43,6 +43,13 @@ jobs:
       - run: mix credo --strict
       - run: mix test --cover
 
+      # Clone the upstream conformance suite as a sibling (the loader resolves it
+      # at ../jsonata relative to the checkout) and gate the whole-suite score.
+      - name: Fetch the upstream conformance suite
+        run: git clone --depth 1 --branch v2.2.1 https://github.com/jsonata-js/jsonata.git ../jsonata
+      - name: Conformance scoreboard
+        run: mix test --only conformance
+
       - name: Cache dialyzer PLT
         uses: actions/cache@v4
         with:
