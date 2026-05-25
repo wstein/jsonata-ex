@@ -15,7 +15,7 @@ defmodule Jsonata.Functions do
   The `$match` custom-matcher protocol is not yet implemented.
   """
 
-  alias Jsonata.{Environment, Error, Function, Sequence, Signature, Value}
+  alias Jsonata.{Environment, Error, Function, Object, Sequence, Signature, Value}
 
   @undefined :undefined
 
@@ -219,18 +219,19 @@ defmodule Jsonata.Functions do
   defp sift([@undefined | _]), do: @undefined
 
   defp sift([map, func]) when is_map(map) do
-    result =
+    pairs =
       map
+      |> Object.pairs()
       |> Enum.filter(fn {key, value} -> jboolean(call_hof(func, value, key, map)) end)
-      |> Map.new()
 
-    if map_size(result) == 0, do: @undefined, else: result
+    if pairs == [], do: @undefined, else: Object.new(pairs)
   end
 
   defp each([@undefined | _]), do: @undefined
 
   defp each([map, func]) when is_map(map) do
     map
+    |> Object.pairs()
     |> Enum.map(fn {key, value} -> call_hof(func, value, key, map) end)
     |> Sequence.from_value()
   end
@@ -591,11 +592,11 @@ defmodule Jsonata.Functions do
   end
 
   defp keys([@undefined]), do: @undefined
-  defp keys([map]) when is_map(map) and not is_struct(map), do: keys_result(Map.keys(map))
 
   defp keys([list]) when is_list(list),
     do: list |> Enum.flat_map(&object_keys/1) |> Enum.uniq() |> keys_result()
 
+  defp keys([object]) when is_map(object), do: keys_result(object_keys(object))
   defp keys([_value]), do: @undefined
 
   # no keys → undefined; a single key collapses to the bare string
@@ -603,10 +604,12 @@ defmodule Jsonata.Functions do
   defp keys_result([single]), do: single
   defp keys_result(keys), do: keys
 
-  defp object_keys(map) when is_map(map), do: Map.keys(map)
-  defp object_keys(_value), do: []
+  defp object_keys(value) do
+    if Object.object?(value), do: Object.keys(value), else: []
+  end
 
   defp lookup([@undefined, _key]), do: @undefined
+  defp lookup([%Object{} = object, key]), do: Object.get(object, key, @undefined)
   defp lookup([map, key]) when is_map(map), do: Map.get(map, key, @undefined)
 
   defp lookup([list, key]) when is_list(list) do
@@ -627,15 +630,21 @@ defmodule Jsonata.Functions do
   defp lookup([_value, _key]), do: @undefined
 
   defp spread([@undefined]), do: @undefined
-
-  defp spread([map]) when is_map(map) and not is_struct(map),
-    do: Enum.map(map, fn {k, v} -> %{k => v} end)
-
   defp spread([list]) when is_list(list), do: Enum.flat_map(list, &spread([&1]))
+  defp spread([%Function{} = value]), do: value
+
+  defp spread([object]) when is_map(object),
+    do: Enum.map(Object.pairs(object), fn {k, v} -> Object.new([{k, v}]) end)
+
   defp spread([value]), do: value
 
   defp merge([@undefined]), do: @undefined
-  defp merge([list]), do: Enum.reduce(list, %{}, &Map.merge(&2, &1))
+
+  defp merge([list]),
+    do: Enum.reduce(list, Object.new(), fn obj, acc -> Object.merge(acc, as_object(obj)) end)
+
+  defp as_object(%Object{} = object), do: object
+  defp as_object(map) when is_map(map), do: Object.new(Object.pairs(map))
 
   defp exists([@undefined]), do: false
   defp exists([_value]), do: true
@@ -666,6 +675,7 @@ defmodule Jsonata.Functions do
   def jboolean(%Function{}), do: false
   def jboolean([single]), do: jboolean(single)
   def jboolean(value) when is_list(value), do: Enum.any?(value, &jboolean/1)
+  def jboolean(%Object{} = object), do: Object.size(object) > 0
   def jboolean(value) when is_map(value), do: map_size(value) > 0
   def jboolean(_value), do: false
 
@@ -780,7 +790,8 @@ defmodule Jsonata.Functions do
     do: encode_container(value, "[", "]", pretty?, depth, &encode_json(&1, pretty?, depth + 1))
 
   defp encode_json(value, pretty?, depth) when is_map(value) do
-    encode_container(value, "{", "}", pretty?, depth, fn {key, val} ->
+    # Object.pairs yields insertion order for an Object, map order for a plain map
+    encode_container(Object.pairs(value), "{", "}", pretty?, depth, fn {key, val} ->
       JSON.encode!(to_string(key)) <>
         if(pretty?, do: ": ", else: ":") <> encode_json(val, pretty?, depth + 1)
     end)

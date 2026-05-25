@@ -12,7 +12,7 @@ defmodule Jsonata.Value do
   values, and scalars by value (so `1` and `1.0` are equal).
   """
 
-  alias Jsonata.Sequence
+  alias Jsonata.{Object, Sequence}
 
   @nothing :undefined
 
@@ -56,7 +56,8 @@ defmodule Jsonata.Value do
 
   defp enumerable?(value), do: is_list(value) or is_struct(value, Sequence)
 
-  defp object?(value), do: is_map(value) and not is_struct(value)
+  # objects compare by content regardless of representation or key order
+  defp object?(value), do: Object.object?(value)
 
   defp scalar_equal(left, right) when is_number(left) and is_number(right), do: left == right
   defp scalar_equal(left, right), do: left === right
@@ -68,7 +69,9 @@ defmodule Jsonata.Value do
   defp list_equal(_left, _right), do: false
 
   defp map_equal(left, right) do
-    Map.keys(left) |> Enum.sort() == Map.keys(right) |> Enum.sort() and
-      Enum.all?(left, fn {key, value} -> deep_equal(value, Map.get(right, key)) end)
+    Enum.sort(Object.keys(left)) == Enum.sort(Object.keys(right)) and
+      Enum.all?(Object.pairs(left), fn {key, value} ->
+        deep_equal(value, Object.get(right, key))
+      end)
   end
 end

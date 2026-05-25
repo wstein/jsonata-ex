@@ -59,11 +59,15 @@ These are deliberate, documented divergences from the reference implementation â
 not bugs. Most expressions are unaffected; the cases below are where an Elixir
 host and the JavaScript reference legitimately differ.
 
-- **Object key order is not preserved.** JSONata objects are decoded into plain
-  Elixir maps, which do not retain insertion order. So `$keys`, `$spread`,
-  `$each`, and multi-key `$string` serialization may emit keys in a different
-  (map-internal) order than jsonata-js. Object *values* and lookups are
-  unaffected; only the *ordering* of keys differs.
+- **Object key order is preserved for constructed and decoded objects, not for
+  plain-map input.** Objects built by an expression (`{â€¦}`, group-by, `$merge`,
+  `$spread`) and objects decoded with `Jsonata.decode/1` keep insertion order, so
+  `$keys`/`$spread`/`$each`/`$string` behave like jsonata-js. But a plain Elixir
+  map passed directly as `input` has no insertion order (Elixir maps don't retain
+  it), so key order for those functions over raw input data follows map-internal
+  order. Decode JSON input with `Jsonata.decode/1` if you need input key order.
+  The public result is always plain Elixir maps (object equality is
+  order-insensitive).
 - **Numbers are arbitrary-precision, not IEEE-754 doubles.** jsonata-js performs
   all arithmetic in JavaScript doubles; this port keeps exact integers. So
   `$factorial(100)` returns the exact 158-digit integer here, where jsonata-js

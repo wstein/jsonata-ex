@@ -18,7 +18,7 @@ defmodule Jsonata.Evaluator do
   transform `|…|` operator.
   """
 
-  alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
+  alias Jsonata.{Environment, Error, Function, Functions, Object, Sequence, Signature, Value}
 
   @undefined :undefined
 
@@ -181,6 +181,7 @@ defmodule Jsonata.Evaluator do
   end
 
   defp validate_update(@undefined), do: @undefined
+  defp validate_update(%Object{} = update), do: update
   defp validate_update(update) when is_map(update) and not is_struct(update), do: update
   defp validate_update(update), do: raise(Error.new("T2011", value: jstringify(update)))
 
@@ -208,6 +209,10 @@ defmodule Jsonata.Evaluator do
     end
   end
 
+  defp transform_children(%Object{} = node, changes),
+    do:
+      Object.new(Enum.map(Object.pairs(node), fn {k, v} -> {k, apply_transform(v, changes)} end))
+
   defp transform_children(node, changes) when is_map(node) and not is_struct(node),
     do: Map.new(node, fn {key, value} -> {key, apply_transform(value, changes)} end)
 
@@ -216,12 +221,25 @@ defmodule Jsonata.Evaluator do
 
   defp transform_children(node, _changes), do: node
 
-  defp apply_change(node, {update, delete}) when is_map(node) and not is_struct(node) do
-    node = if is_map(update), do: Map.merge(node, update), else: node
-    if is_list(delete), do: Map.drop(node, delete), else: node
+  # merge the update's pairs in, then drop the deleted keys — order-preserving
+  # for an Object node, content-only for a plain map
+  defp apply_change(node, {update, delete}) do
+    if Object.object?(node) do
+      node = if Object.object?(update), do: apply_update_pairs(node, update), else: node
+      if is_list(delete), do: drop_keys(node, delete), else: node
+    else
+      node
+    end
   end
 
-  defp apply_change(node, _change), do: node
+  defp apply_update_pairs(%Object{} = node, update),
+    do: Enum.reduce(Object.pairs(update), node, fn {k, v}, acc -> Object.put(acc, k, v) end)
+
+  defp apply_update_pairs(node, update) when is_map(node),
+    do: Enum.reduce(Object.pairs(update), node, fn {k, v}, acc -> Map.put(acc, k, v) end)
+
+  defp drop_keys(%Object{} = node, keys), do: Enum.reduce(keys, node, &Object.delete(&2, &1))
+  defp drop_keys(node, keys) when is_map(node), do: Map.drop(node, keys)
 
   defp make_lambda(expr, input, env) do
     %Function{
@@ -503,13 +521,13 @@ defmodule Jsonata.Evaluator do
 
     {groups, order} = build_groups(items, pairs, env)
 
-    Enum.reduce(order, %{}, fn key, acc ->
+    Enum.reduce(order, Object.new(), fn key, acc ->
       {data, index} = Map.fetch!(groups, key)
       [_key_ast, value_ast] = Enum.at(pairs, index)
 
       case eval_val(value_ast, data, env) do
         @undefined -> acc
-        value -> Map.put(acc, key, value)
+        value -> Object.put(acc, key, value)
       end
     end)
   end
@@ -529,7 +547,7 @@ defmodule Jsonata.Evaluator do
         end)
       end)
 
-    Enum.reduce(order, %{}, fn key, acc ->
+    Enum.reduce(order, Object.new(), fn key, acc ->
       {data_tuples, index} = Map.fetch!(groups, key)
       [_key_ast, value_ast] = Enum.at(pairs, index)
       reduced = reduce_tuples(data_tuples)
@@ -537,7 +555,7 @@ defmodule Jsonata.Evaluator do
 
       case eval_val(value_ast, reduced["@"], frame) do
         @undefined -> acc
-        value -> Map.put(acc, key, value)
+        value -> Object.put(acc, key, value)
       end
     end)
   end
@@ -745,10 +763,15 @@ defmodule Jsonata.Evaluator do
     end)
   end
 
+  defp lookup(%Object{} = object, key), do: Object.get(object, key, @undefined)
+
   defp lookup(input, key) when is_map(input) and not is_struct(input),
     do: Map.get(input, key, @undefined)
 
   defp lookup(_input, _key), do: @undefined
+
+  defp evaluate_wildcard(%Object{} = object),
+    do: object |> Object.pairs() |> Enum.map(&elem(&1, 1)) |> wildcard_values()
 
   defp evaluate_wildcard(input) when is_map(input) and not is_struct(input),
     do: input |> Map.values() |> wildcard_values()
@@ -776,6 +799,12 @@ defmodule Jsonata.Evaluator do
 
   defp recurse_descendants(input, acc) when is_list(input) do
     Enum.reduce(input, acc, fn member, a -> recurse_descendants(member, a) end)
+  end
+
+  defp recurse_descendants(%Object{} = object, acc) do
+    Enum.reduce(Object.pairs(object), acc ++ [object], fn {_key, value}, a ->
+      recurse_descendants(value, a)
+    end)
   end
 
   defp recurse_descendants(input, acc) when is_map(input) and not is_struct(input) do
@@ -956,7 +985,7 @@ defmodule Jsonata.Evaluator do
     items = if is_list(input), do: input, else: [input]
     items = if items == [], do: [@undefined], else: items
 
-    Enum.reduce(pairs, %{}, fn [key_expr, value_expr], acc ->
+    Enum.reduce(pairs, Object.new(), fn [key_expr, value_expr], acc ->
       Enum.reduce(items, acc, fn item, inner ->
         add_object_entry(inner, key_expr, value_expr, item, env, position)
       end)
@@ -971,7 +1000,7 @@ defmodule Jsonata.Evaluator do
       key when is_binary(key) ->
         case eval_val(value_expr, item, env) do
           @undefined -> acc
-          value -> Map.put(acc, key, value)
+          value -> Object.put(acc, key, value)
         end
 
       key ->

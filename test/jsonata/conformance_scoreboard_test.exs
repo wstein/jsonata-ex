@@ -16,7 +16,7 @@ defmodule Jsonata.ConformanceScoreboardTest do
 
   # The agreed milestone baseline (see MIGRATION.md). Raise this when the score
   # improves; a drop below it fails CI, protecting against silent regressions.
-  @baseline 1_359
+  @baseline 1_369
 
   @timeout_ms 5_000
   # ~2 GB per worker (64-bit words): kills a runaway case, never the node.

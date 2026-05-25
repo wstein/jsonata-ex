@@ -117,13 +117,20 @@ defmodule Jsonata.Conformance do
     end
   end
 
-  @doc "Loads and decodes a named dataset (without the `.json` extension)."
+  @doc """
+  Loads and decodes a named dataset (without the `.json` extension), preserving
+  object key order (as `Jsonata.Object`) so `$keys`/`$spread`/`$each`/`$string`
+  see insertion order (ADR-3).
+  """
   @spec dataset(String.t(), String.t()) :: term()
   def dataset(root \\ @default_root, name) do
-    root
-    |> Path.join(["datasets/", name, ".json"])
-    |> File.read!()
-    |> JSON.decode!()
+    {:ok, value} =
+      root
+      |> Path.join(["datasets/", name, ".json"])
+      |> File.read!()
+      |> Jsonata.Object.from_json()
+
+    value
   end
 
   defp files(root) do

@@ -98,7 +98,9 @@ defmodule Jsonata do
         Environment.bind(env, name, host_value(name, value))
       end)
 
-    {:ok, Evaluator.evaluate(ast, input, env)}
+    # ordered objects are an internal representation (ADR-3); the public contract
+    # is plain Elixir maps, so collapse them at the output boundary
+    {:ok, Jsonata.Object.to_plain(Evaluator.evaluate(ast, input, env))}
   rescue
     error in Error -> {:error, error}
   end
@@ -110,6 +112,23 @@ defmodule Jsonata do
   end
 
   defp host_value(_name, value), do: value
+
+  @doc """
+  Decodes a JSON `string` into a value suitable as `evaluate/3` input,
+  **preserving object key order** (objects become `Jsonata.Object`, arrays become
+  lists, `null` becomes `nil`).
+
+  Use this instead of a plain-map decode when `$keys`/`$spread`/`$each`/`$string`
+  over the input must follow JSON insertion order. Returns `{:ok, value}` or
+  `{:error, reason}`.
+
+      iex> {:ok, data} = Jsonata.decode(~s({"b": 1, "a": 2}))
+      iex> Jsonata.evaluate("$keys($)", data)
+      {:ok, ["b", "a"]}
+
+  """
+  @spec decode(binary()) :: {:ok, term()} | {:error, term()}
+  defdelegate decode(string), to: Jsonata.Object, as: :from_json
 
   @doc """
   Returns the library version.

@@ -52,6 +52,10 @@ the upstream language-agnostic conformance suite (~97% of specified cases pass).
   non-integers (`22/7` → `"3.14285714285714"`), functions serialized as `""`, and
   the `prettify` argument (2-space indented JSON). The `&` concatenation operator
   shares the same number formatting.
+- **Ordered objects (ADR-3)** — constructed and decoded objects preserve key
+  insertion order (`Jsonata.Object`), so `$keys`/`$spread`/`$each`/`$string`
+  match jsonata-js. `Jsonata.decode/1` decodes JSON input preserving object key
+  order; results are still plain Elixir maps at the boundary.
 - **Host integration** — `$eval`, and registering Elixir functions as callable
   `$fn` via `Jsonata.evaluate/3` bindings.
 - **Tooling** — `credo --strict`, `dialyzer` (clean), 90%+ test coverage, and
@@ -63,5 +67,6 @@ the upstream language-agnostic conformance suite (~97% of specified cases pass).
 
 ### Not yet implemented
 
-- Order-sensitive object key handling (`$keys`/`$spread`/`$each`).
+- Object key order for **plain-map input** passed directly to `evaluate/3`
+  (Elixir maps carry no insertion order — use `Jsonata.decode/1` to preserve it).
 - JavaScript-style **async** functions (out of scope for the synchronous engine).

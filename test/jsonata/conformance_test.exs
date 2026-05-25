@@ -87,8 +87,9 @@ defmodule Jsonata.ConformanceTest do
   end
 
   describe "dataset/2" do
-    test "decodes a named dataset" do
-      assert Conformance.dataset(@fixtures, "dataset0") == %{"hello" => "world"}
+    test "decodes a named dataset, preserving key order as a Jsonata.Object" do
+      assert %Jsonata.Object{keys: ["hello"], map: %{"hello" => "world"}} =
+               Conformance.dataset(@fixtures, "dataset0")
     end
   end
 

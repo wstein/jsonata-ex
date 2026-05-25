@@ -52,7 +52,8 @@ defmodule Jsonata.FormatNumber do
   # --- properties -----------------------------------------------------------
 
   defp merge_options(:undefined), do: @defaults
-  defp merge_options(options) when is_map(options), do: Map.merge(@defaults, options)
+  # the options object may be an ordered Jsonata.Object — normalise to a plain map
+  defp merge_options(options), do: Map.merge(@defaults, Map.new(Jsonata.Object.pairs(options)))
 
   defp digit_family(props) do
     <<zero::utf8>> = props["zero-digit"]
