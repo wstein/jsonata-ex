@@ -157,6 +157,11 @@ defmodule Jsonata.EvaluatorTest do
       assert eval("($a := 1; $c := ($a := 4; $a + 1); $a + $c)") == 6
     end
 
+    test "a chained assignment binds every name" do
+      assert eval("($a := $b := 5; $b)") == 5
+      assert eval("($a := $b := 5; $a)") == 5
+    end
+
     test "context and external bindings" do
       assert eval("$", 5) == 5
       assert eval("$x + 1", :undefined, %{"x" => 10}) == 11

@@ -83,7 +83,9 @@ defmodule Jsonata.Evaluator do
     do: {expr.value, env}
 
   defp eval_node(%{type: :bind} = expr, input, env) do
-    value = name_lambda(eval_val(expr.rhs, input, env), expr.lhs.value)
+    # thread the rhs environment so a chained `$a := $b := 5` binds both names
+    {raw, env} = eval(expr.rhs, input, env)
+    value = name_lambda(raw, expr.lhs.value)
     {value, Environment.bind(env, expr.lhs.value, value)}
   end
 

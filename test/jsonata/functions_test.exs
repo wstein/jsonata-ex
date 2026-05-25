@@ -36,6 +36,23 @@ defmodule Jsonata.FunctionsTest do
       assert %Error{code: "D3030"} = eval_error(~s|$number("nope")|)
     end
 
+    test "number parses hex, binary, and octal literals" do
+      assert eval(~s|$number("0x12")|) == 18
+      assert eval(~s|$number("0B101")|) == 5
+      assert eval(~s|$number("0o12")|) == 10
+    end
+
+    test "round half to even is decimal-correct" do
+      assert eval("$round(4.525, 2)") == 4.52
+      assert eval("$round(4.515, 2)") == 4.52
+      assert eval("$round(-0.5)") == 0
+    end
+
+    test "formatBase rounds value and radix to even" do
+      assert eval("$formatBase(99.5, 2.5)") == "1100100"
+      assert eval("$formatBase(5890840712243076)") == "5890840712243076"
+    end
+
     test "abs, floor, ceil on integers and floats" do
       assert eval("$abs(-5)") == 5
       assert eval("$floor(0)") == 0
@@ -141,6 +158,31 @@ defmodule Jsonata.FunctionsTest do
       assert eval("$zip([1, 2], [3, 4])") == [[1, 3], [2, 4]]
       assert eval(~s|$lookup({"a": 1}, "a")|) == 1
       assert eval(~s|$merge([{"a": 1}, {"b": 2}])|) == %{"a" => 1, "b" => 2}
+    end
+
+    test "zip with an undefined argument is empty" do
+      assert eval("$zip([1, 2, 3], [4, 5, 6], nothing)") == []
+    end
+
+    test "lookup of a missing key across an array is undefined" do
+      assert eval(~s|$lookup([{"a": 1}, {"a": 2}], "b")|) == :undefined
+    end
+
+    test "shuffle returns a permutation" do
+      assert eval("$sort($shuffle([1..10]))") == Enum.to_list(1..10)
+      assert eval("$shuffle([1])") == [1]
+      assert eval("$shuffle(nothing)") == :undefined
+    end
+
+    test "single returns the sole element, with or without a predicate" do
+      assert eval("$single([5])") == 5
+      assert eval("$single([1, 2, 3], function($v) { $v = 2 })") == 2
+      assert %Error{code: "D3138"} = eval_error("$single([1, 2, 3])")
+      assert %Error{code: "D3139"} = eval_error("$single([1, 2, 3], function($v) { $v > 9 })")
+    end
+
+    test "pad treats an empty padding character as a space" do
+      assert eval(~s|$pad("foo", 5, "")|) == "foo  "
     end
 
     test "exists and type" do

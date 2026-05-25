@@ -114,6 +114,7 @@ defmodule Jsonata.Functions do
       # --- array / object ---
       {"append", "<xx:a>", &append/1},
       {"reverse", "<a:a>", &reverse/1},
+      {"shuffle", "<a:a>", &shuffle/1},
       {"distinct", "<x:x>", &distinct/1},
       {"sort", "<af?:a>", &sort/1},
       {"zip", "<a+>", &zip/1},
@@ -172,9 +173,7 @@ defmodule Jsonata.Functions do
     matches =
       arr
       |> Enum.with_index()
-      |> Enum.filter(fn {item, index} ->
-        is_nil(func) or jboolean(call_hof(func, item, index, arr))
-      end)
+      |> Enum.filter(fn {item, index} -> single_match?(func, item, index, arr) end)
 
     case matches do
       [{item, _index}] -> item
@@ -182,6 +181,9 @@ defmodule Jsonata.Functions do
       _many -> raise Error.new("D3138")
     end
   end
+
+  defp single_match?(func, _item, _index, _arr) when func in [nil, @undefined], do: true
+  defp single_match?(func, item, index, arr), do: jboolean(call_hof(func, item, index, arr))
 
   defp reduce([@undefined | _]), do: @undefined
   defp reduce([seq, func]), do: reduce([seq, func, :undefined])
@@ -278,33 +280,58 @@ defmodule Jsonata.Functions do
   defp number([false]), do: 0
 
   defp number([value]) when is_binary(value) do
-    case parse_number(value) do
+    case parse_radix(value) || parse_number(value) do
       {:ok, number} -> number
-      :error -> raise Error.new("D3030", value: value)
+      _ -> raise Error.new("D3030", value: value)
     end
   end
 
+  # JavaScript-style 0x / 0b / 0o integer literals
+  defp parse_radix(value) do
+    case Regex.run(~r/^0([xXbBoO])([0-9a-fA-F]+)$/, value) do
+      [_, prefix, digits] -> {:ok, String.to_integer(digits, radix_for(prefix))}
+      nil -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp radix_for(p) when p in ["x", "X"], do: 16
+  defp radix_for(p) when p in ["b", "B"], do: 2
+  defp radix_for(p) when p in ["o", "O"], do: 8
+
   defp round_fn([@undefined | _]), do: @undefined
-  defp round_fn([value]), do: round_half_even(value, 0)
-  defp round_fn([value, @undefined]), do: round_half_even(value, 0)
-  defp round_fn([value, precision]), do: round_half_even(value, precision)
+  defp round_fn([value]), do: bankers_round(value, 0)
+  defp round_fn([value, @undefined]), do: bankers_round(value, 0)
+  defp round_fn([value, precision]), do: bankers_round(value, trunc(precision))
 
-  # Banker's rounding (round half to even), matching JSONata $round.
-  defp round_half_even(value, precision) do
-    factor = :math.pow(10, precision)
-    scaled = value * factor
-    floor_val = Float.floor(scaled)
-    diff = scaled - floor_val
+  @doc "JSONata `$round` — round half to even, exposed for `$formatBase`/datetime."
+  @spec bankers_round(number(), integer()) :: number()
+  # an integer is already rounded at non-negative precision (and stays exact —
+  # avoids the precision loss of float conversion for big integers)
+  def bankers_round(value, precision) when is_integer(value) and precision >= 0, do: value
+  def bankers_round(value, 0), do: normalize_number(round_half_even(value * 1.0))
 
-    rounded =
-      cond do
-        diff < 0.5 -> floor_val
-        diff > 0.5 -> floor_val + 1
-        rem(trunc(floor_val), 2) == 0 -> floor_val
-        true -> floor_val + 1
-      end
+  def bankers_round(value, precision) do
+    # shift the decimal place in the string form to dodge the float-precision
+    # errors that scaling by a power of ten introduces (mirrors jsonata-js)
+    shifted = decimal_shift(value * 1.0, precision)
+    normalize_number(decimal_shift(round_half_even(shifted), -precision))
+  end
 
-    normalize_number(rounded / factor)
+  defp decimal_shift(value, places) do
+    [mantissa | exponent] = String.split(number_to_string(value), "e")
+    shifted = if exponent == [], do: places, else: String.to_integer(hd(exponent)) + places
+    {number, ""} = Float.parse(mantissa <> "e" <> Integer.to_string(shifted))
+    number
+  end
+
+  defp round_half_even(value) do
+    result = Float.floor(value + 0.5)
+
+    if abs(result - value) == 0.5 and abs(rem(trunc(result), 2)) == 1,
+      do: result - 1.0,
+      else: result
   end
 
   defp power([@undefined | _]), do: @undefined
@@ -325,13 +352,13 @@ defmodule Jsonata.Functions do
   defp format_base([value, :undefined]), do: format_base([value, 10])
 
   defp format_base([value, radix]) do
-    radix = round(radix)
+    radix = bankers_round(radix, 0)
 
     if radix < 2 or radix > 36 do
       raise Error.new("D3100", value: radix)
     end
 
-    value |> round() |> Integer.to_string(radix) |> String.downcase()
+    value |> bankers_round(0) |> Integer.to_string(radix) |> String.downcase()
   end
 
   defp format_number([@undefined | _]), do: @undefined
@@ -387,6 +414,7 @@ defmodule Jsonata.Functions do
   defp pad([@undefined | _]), do: @undefined
   defp pad([string, width]), do: pad([string, width, " "])
   defp pad([string, width, @undefined]), do: pad([string, width, " "])
+  defp pad([string, width, ""]), do: pad([string, width, " "])
 
   defp pad([string, width, char]) do
     pad_to = abs(trunc(width))
@@ -517,6 +545,10 @@ defmodule Jsonata.Functions do
   defp reverse([@undefined]), do: @undefined
   defp reverse([list]), do: Enum.reverse(list)
 
+  defp shuffle([@undefined]), do: @undefined
+  defp shuffle([[single]]), do: [single]
+  defp shuffle([list]), do: Enum.shuffle(list)
+
   defp distinct([@undefined]), do: @undefined
   defp distinct([list]) when is_list(list), do: dedup(list, [])
   defp distinct([value]), do: value
@@ -544,11 +576,16 @@ defmodule Jsonata.Functions do
     end
   end
 
+  # an undefined argument makes the whole zip empty (matches jsonata-js)
   defp zip(arrays) do
-    arrays
-    |> Enum.map(&as_list/1)
-    |> Enum.zip()
-    |> Enum.map(&Tuple.to_list/1)
+    if Enum.any?(arrays, &(&1 == @undefined)) do
+      []
+    else
+      arrays
+      |> Enum.map(&as_list/1)
+      |> Enum.zip()
+      |> Enum.map(&Tuple.to_list/1)
+    end
   end
 
   defp keys([@undefined]), do: @undefined
@@ -571,7 +608,10 @@ defmodule Jsonata.Functions do
         value -> [value]
       end
     end)
-    |> collapse_list()
+    |> case do
+      [] -> @undefined
+      results -> collapse_list(results)
+    end
   end
 
   defp lookup([_value, _key]), do: @undefined
