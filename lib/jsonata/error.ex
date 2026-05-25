@@ -60,6 +60,8 @@ defmodule Jsonata.Error do
     "T0412" => "Argument {{index}} of function {{token}} must be an array of {{type}}",
     "T1005" => "Attempted to invoke a non-function. Did you mean ${{token}}?",
     "T1006" => "Attempted to invoke a non-function",
+    "T1010" =>
+      "The matcher function argument passed to function {{token}} does not return the correct object structure",
     "D3001" => "Attempting to invoke string function on Infinity or NaN",
     "D3010" => "Second argument of replace function cannot be an empty string",
     "D3011" => "Fourth argument of replace function must evaluate to a positive number",

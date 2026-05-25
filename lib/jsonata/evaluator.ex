@@ -263,7 +263,7 @@ defmodule Jsonata.Evaluator do
   defp drop_keys(%Object{} = node, keys), do: Enum.reduce(keys, node, &Object.delete(&2, &1))
 
   defp make_lambda(expr, input, env) do
-    %Function{
+    with_impl(%Function{
       name: "lambda",
       params: Enum.map(expr.arguments, & &1.value),
       body: expr.body,
@@ -271,8 +271,14 @@ defmodule Jsonata.Evaluator do
       input: input,
       arity: length(expr.arguments),
       signature: lambda_signature(expr.signature)
-    }
+    })
   end
+
+  # A lambda value is callable via its `impl` (so `Jsonata.Functions` can apply a
+  # lambda extracted from data — e.g. the matcher protocol's `next` iterator —
+  # without depending on the evaluator). Rebuilt by `name_lambda` so the captured
+  # `func` reflects `self_name` for recursion.
+  defp with_impl(%Function{} = func), do: %{func | impl: fn args -> run_lambda(func, args) end}
 
   defp lambda_signature(nil), do: nil
   defp lambda_signature(sig) when is_binary(sig), do: Signature.parse(sig)
@@ -280,7 +286,7 @@ defmodule Jsonata.Evaluator do
   # Records the bound name on a lambda so it can re-bind itself at application
   # time, enabling self-recursion (`$f := function(...){ ... $f(...) }`).
   defp name_lambda(%Function{body: body} = func, name) when not is_nil(body),
-    do: %{func | self_name: name}
+    do: with_impl(%{func | self_name: name})
 
   defp name_lambda(value, _name), do: value
 
@@ -343,13 +349,24 @@ defmodule Jsonata.Evaluator do
     }
   end
 
+  # Lambdas carry both `body` and (since creation) `impl`; check `body` first so a
+  # direct call validates once, while built-ins/wrapped args/compositions (no body)
+  # fall through to the `impl` clause.
+  defp apply_function(%Function{body: body} = func, args, _input, _position)
+       when not is_nil(body),
+       do: run_lambda(func, args)
+
   defp apply_function(%Function{impl: impl, signature: sig, name: name}, args, input, _position)
        when not is_nil(impl) do
     impl.(validate_args(sig, args, input, name))
   end
 
-  defp apply_function(%Function{body: body, env: env} = func, args, _input, _position)
-       when not is_nil(body) do
+  defp apply_function(_proc, _args, _input, position),
+    do: raise(Error.new("T1006", position: position))
+
+  # Binds the validated arguments (and, for a named lambda, itself for recursion)
+  # in a child of the definition environment, then evaluates the body.
+  defp run_lambda(%Function{body: body, env: env} = func, args) do
     validated = validate_args(func.signature, args, func.input, func.name)
 
     base =
@@ -366,9 +383,6 @@ defmodule Jsonata.Evaluator do
 
     evaluate(body, func.input, frame)
   end
-
-  defp apply_function(_proc, _args, _input, position),
-    do: raise(Error.new("T1006", position: position))
 
   defp validate_args(nil, args, _input, _name), do: args
 

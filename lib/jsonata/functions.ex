@@ -430,7 +430,12 @@ defmodule Jsonata.Functions do
   end
 
   defp contains([@undefined | _]), do: @undefined
-  defp contains([string, %Function{regex: regex}]), do: Regex.match?(regex, string)
+
+  defp contains([string, %Function{regex: regex}]) when not is_nil(regex),
+    do: Regex.match?(regex, string)
+
+  defp contains([string, %Function{} = matcher]),
+    do: matcher_matches(matcher, string, "contains") != []
 
   defp contains([string, substring]) when is_binary(substring),
     do: String.contains?(string, substring)
@@ -440,11 +445,25 @@ defmodule Jsonata.Functions do
 
   defp split([string, "", limit]), do: string |> String.graphemes() |> take_limit(limit)
 
-  defp split([string, %Function{regex: regex}, limit]),
+  defp split([string, %Function{regex: regex}, limit]) when not is_nil(regex),
     do: regex |> Regex.split(string) |> take_limit(limit)
+
+  defp split([string, %Function{} = matcher, limit]),
+    do: string |> split_on_matches(matcher_matches(matcher, string, "split")) |> take_limit(limit)
 
   defp split([string, separator, limit]) when is_binary(separator),
     do: string |> String.split(separator) |> take_limit(limit)
+
+  # split `string` at each match boundary (using character offsets/lengths)
+  defp split_on_matches(string, matches) do
+    {parts, last} =
+      Enum.reduce(matches, {[], 0}, fn match, {acc, pos} ->
+        start = match["index"]
+        {[String.slice(string, pos, start - pos) | acc], start + String.length(match["match"])}
+      end)
+
+    Enum.reverse([String.slice(string, last..-1//1) | parts])
+  end
 
   defp take_limit(list, @undefined), do: list
   defp take_limit(list, limit), do: Enum.take(list, trunc(limit))
@@ -465,13 +484,34 @@ defmodule Jsonata.Functions do
 
   # regex pattern, string replacement (with $0/$$/$N substitution)
   defp replace([string, %Function{regex: regex}, replacement, limit])
-       when is_binary(replacement) do
-    replace_regex(string, regex, &substitute(replacement, &1), limit)
+       when not is_nil(regex) and is_binary(replacement) do
+    splice_matches(string, regex_matches(regex, string), &substitute(replacement, &1), limit)
   end
 
   # regex pattern, function replacement (called per match; must return a string)
-  defp replace([string, %Function{regex: regex}, %Function{} = fun, limit]) do
-    replace_regex(string, regex, &call_replacer(fun, &1), limit)
+  defp replace([string, %Function{regex: regex}, %Function{} = fun, limit])
+       when not is_nil(regex) do
+    splice_matches(string, regex_matches(regex, string), &call_replacer(fun, &1), limit)
+  end
+
+  # custom-matcher pattern (a user function returning the match-object protocol)
+  defp replace([string, %Function{} = matcher, replacement, limit])
+       when is_binary(replacement) do
+    splice_matches(
+      string,
+      matcher_matches(matcher, string, "replace"),
+      &substitute(replacement, &1),
+      limit
+    )
+  end
+
+  defp replace([string, %Function{} = matcher, %Function{} = fun, limit]) do
+    splice_matches(
+      string,
+      matcher_matches(matcher, string, "replace"),
+      &call_replacer(fun, &1),
+      limit
+    )
   end
 
   # literal string pattern — an empty pattern is an error
@@ -495,12 +535,13 @@ defmodule Jsonata.Functions do
   end
 
   # Apply `replacer` (string-substitution or a function) to the first `limit`
-  # regex matches, splicing the result back into `string` (character offsets).
-  defp replace_regex(string, regex, replacer, limit) do
-    matches = regex |> regex_matches(string) |> take_limit(limit)
-
+  # matches, splicing the result back into `string` (character offsets). The
+  # match list is produced by either a regex or a custom matcher.
+  defp splice_matches(string, matches, replacer, limit) do
     {parts, last} =
-      Enum.reduce(matches, {[], 0}, fn match, {acc, pos} ->
+      matches
+      |> take_limit(limit)
+      |> Enum.reduce({[], 0}, fn match, {acc, pos} ->
         start = match["index"]
         before = String.slice(string, pos, start - pos)
         {[acc, before, replacer.(match)], start + String.length(match["match"])}
@@ -602,8 +643,48 @@ defmodule Jsonata.Functions do
   defp match([@undefined | _]), do: @undefined
   defp match([string, regex]), do: match([string, regex, @undefined])
 
-  defp match([string, %Function{regex: regex}, limit]) do
+  defp match([string, %Function{regex: regex}, limit]) when not is_nil(regex) do
     regex |> regex_matches(string) |> take_limit(limit) |> Sequence.from_value()
+  end
+
+  defp match([string, %Function{} = matcher, limit]) do
+    matcher |> matcher_matches(string, "match") |> take_limit(limit) |> Sequence.from_value()
+  end
+
+  # The custom-matcher protocol: a user function `string -> undefined | {match,
+  # start, end, groups, next}` (`next` yields the following match). Iterate it
+  # into our internal match-object shape, raising T1010 for a malformed result.
+  defp matcher_matches(%Function{} = matcher, string, fn_name) do
+    matcher |> apply_matcher([string], fn_name) |> collect_matcher_matches(fn_name, [])
+  end
+
+  defp apply_matcher(%Function{impl: impl}, args, fn_name),
+    do: validate_matcher_result(impl.(args), fn_name)
+
+  defp collect_matcher_matches(result, _fn_name, acc) when result in [@undefined, nil],
+    do: Enum.reverse(acc)
+
+  defp collect_matcher_matches(result, fn_name, acc) do
+    entry = %{
+      "match" => Object.get(result, "match"),
+      "index" => Object.get(result, "start"),
+      "groups" => Object.get(result, "groups", [])
+    }
+
+    next = apply_matcher(Object.get(result, "next"), [], fn_name)
+    collect_matcher_matches(next, fn_name, [entry | acc])
+  end
+
+  defp validate_matcher_result(result, _fn_name) when result in [@undefined, nil], do: result
+
+  defp validate_matcher_result(result, fn_name) do
+    if Object.object?(result) and is_number(Object.get(result, "start")) and
+         is_number(Object.get(result, "end")) and is_list(Object.get(result, "groups")) and
+         match?(%Function{}, Object.get(result, "next")) do
+      result
+    else
+      raise Error.new("T1010", token: fn_name)
+    end
   end
 
   defp regex_matches(regex, string) do

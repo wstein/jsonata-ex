@@ -28,7 +28,11 @@ the upstream language-agnostic conformance suite (~98% of specified cases pass).
   accepts integer-valued float bounds; wildcard `*` iterates array elements;
   regex matchers (`$match` and the regex forms of `$contains`/`$split`/
   `$replace` — the latter with full `$0`/`$$`/`$N` substitution, match limits,
-  function replacements, and `D3010`/`D3011`/`D3012` validation), order-by `^`,
+  function replacements, and `D3010`/`D3011`/`D3012` validation), the
+  **custom-matcher protocol** (a user function returning
+  `undefined | {match, start, end, groups, next}` — where `next` is a zero-arg
+  iterator — accepted by `$match`/`$contains`/`$split`/`$replace`, with `T1010`
+  for a malformed result), order-by `^`,
   group-by `{`, the positional
   tuple-stream operators focus `@` / index `#` (joins), the parent operator
   `%` — the slot/ancestry resolution that binds an ancestor step's context

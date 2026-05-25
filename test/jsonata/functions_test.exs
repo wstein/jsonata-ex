@@ -335,6 +335,56 @@ defmodule Jsonata.FunctionsTest do
     end
   end
 
+  describe "custom matcher protocol" do
+    # A user function `string -> undefined | {match, start, end, groups, next}`,
+    # where `next` is a zero-arg iterator yielding the following match.
+    @matcher """
+    (
+      $genMatch := function($ch) {
+        $m := function($str, $offset) {(
+          $before := $substringBefore($str, $ch);
+          $start := $length($before) + ($exists($offset) ? $offset : 0);
+          $end := $start + $length($ch);
+          $before != $str and $length($ch) > 0 ? {
+            "match": $ch, "start": $start, "end": $end, "groups": [],
+            "next": function() {$m($substringAfter($str, $ch), $end)}
+          }
+        )}
+      };
+    """
+
+    defp with_matcher(expr), do: eval(@matcher <> expr <> ")")
+
+    test "$match iterates a user matcher into match objects" do
+      assert with_matcher(~s|$match("abracadabra", $genMatch("a"))|) == [
+               %{"match" => "a", "index" => 0, "groups" => []},
+               %{"match" => "a", "index" => 3, "groups" => []},
+               %{"match" => "a", "index" => 5, "groups" => []},
+               %{"match" => "a", "index" => 7, "groups" => []},
+               %{"match" => "a", "index" => 10, "groups" => []}
+             ]
+    end
+
+    test "$match honours a limit on a user matcher" do
+      assert with_matcher(~s|$count($match("abracadabra", $genMatch("a"), 2))|) == 2
+    end
+
+    test "$contains, $split, and $replace accept a user matcher" do
+      assert with_matcher(~s|$contains("abracadabra", $genMatch("a"))|) == true
+      assert with_matcher(~s|$contains("xyz", $genMatch("a"))|) == false
+
+      assert with_matcher(~s|$split("abracadabra", $genMatch("a"))|) ==
+               ["", "br", "c", "d", "br", ""]
+
+      assert with_matcher(~s|$replace("abracadabra", $genMatch("a"), "_")|) == "_br_c_d_br_"
+    end
+
+    test "a matcher returning the wrong shape raises T1010" do
+      assert %Error{code: "T1010"} = eval_error(~s|$split("some text", $uppercase)|)
+      assert %Error{code: "T1010"} = eval_error(~s|$match("some text", $uppercase)|)
+    end
+  end
+
   describe "$eval and host functions" do
     test "$eval parses and evaluates in the current scope" do
       assert eval(~s|$eval("[1,2,3].($*2)")|) == [2, 4, 6]
