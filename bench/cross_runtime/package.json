@@ -1,0 +1,9 @@
+{
+  "name": "jsonata-ex-cross-runtime-bench",
+  "private": true,
+  "type": "module",
+  "description": "Compares jsonata-js timings against the Elixir port (see compare.exs).",
+  "dependencies": {
+    "jsonata": "2.2.1"
+  }
+}

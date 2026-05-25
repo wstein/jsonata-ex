@@ -25,3 +25,9 @@ erl_crash.dump
 # Dialyzer PLT files.
 /priv/plts/*.plt
 /priv/plts/*.plt.hash
+
+# Hex package tarball from "mix hex.build".
+/*.tar
+
+# node_modules for the cross-runtime benchmark (run "npm install" there).
+/bench/cross_runtime/node_modules/

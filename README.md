@@ -94,7 +94,16 @@ mix test --cover
 mix dialyzer
 mix docs
 mix run bench/jsonata_bench.exs   # Benchee micro-benchmarks
+
+# Cross-runtime comparison against jsonata-js (needs Node):
+cd bench/cross_runtime && npm install && cd -
+mix run bench/cross_runtime/compare.exs
 ```
+
+On the maintainer's machine the cross-runtime comparison shows this port
+evaluating common expression shapes roughly 2–11× faster than jsonata-js
+(compiled-expression, like-for-like); treat the ratios as ballpark and
+re-measure on your own hardware.
 
 The conformance suite lives in the sibling `jsonata` submodule. Its loader,
 `Jsonata.Conformance` (in `test/support`, so it is not shipped in the package),
