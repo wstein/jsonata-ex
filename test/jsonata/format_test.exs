@@ -48,6 +48,18 @@ defmodule Jsonata.FormatTest do
     test "a picture with no mandatory digit raises D3130" do
       assert %Error{code: "D3130"} = fmt_error(5, "###")
     end
+
+    test "non-ASCII decimal digit families format and parse" do
+      # Arabic-Indic (zero U+0660) and fullwidth (zero U+FF10)
+      assert fmt(12_340, "###١") == "١٢٣٤٠"
+      assert fmt(12_340, "###０") == "１２３４０"
+      assert parse("١٢٣٤٠", "###١") == 12_340
+      assert parse("１２３４０", "###０") == 12_340
+    end
+
+    test "mixing digit families in one picture raises D3131" do
+      assert %Error{code: "D3131"} = fmt_error(5, "0١")
+    end
   end
 
   describe "ordinal modifier" do

@@ -53,9 +53,10 @@ the upstream language-agnostic conformance suite (~98% of specified cases pass).
   (date-only, year-only).
 - **Picture strings** — `$formatInteger` and `$parseInteger` (`Jsonata.Format`):
   decimal patterns with regular and irregular grouping separators, the `;o`
-  ordinal modifier, Roman numerals (`i`/`I`), letter sequences (`a`/`A`), and
-  spelled-out words (`w`/`W`/`Ww`). Non-ASCII digit groups and numbers ≥ 10⁴⁶ are
-  not yet supported. `$formatNumber` (`Jsonata.FormatNumber`): the full XPath F&O
+  ordinal modifier, any Unicode decimal-digit family (ASCII, Arabic-Indic,
+  fullwidth, …; a mixed-family picture raises `D3131`), Roman numerals (`i`/`I`),
+  letter sequences (`a`/`A`), and spelled-out words (`w`/`W`/`Ww`). Numbers ≥ 10⁴⁶
+  spelled as words are not yet supported. `$formatNumber` (`Jsonata.FormatNumber`): the full XPath F&O
   DecimalFormat — grouping (regular/irregular), exponent notation, percent and
   per-mille scaling, the positive;negative sub-picture pair, a `properties`
   options object, and `D3080`–`D3093` picture validation.

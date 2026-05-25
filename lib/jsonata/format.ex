@@ -4,9 +4,10 @@ defmodule Jsonata.Format do
   (ported from `datetime.js`).
 
   Supports the XPath F&O integer picture forms: decimal-digit patterns
-  (`0`/`#`/grouping, with the `;o` ordinal modifier), Roman numerals (`i`/`I`),
-  letter sequences (`a`/`A`), and spelled-out words (`w`/`W`/`Ww`). ASCII digit
-  groups only; the numbering-sequence form is unsupported (`D3130`).
+  (`0`/`#`/grouping, with the `;o` ordinal modifier) in any Unicode decimal-digit
+  family (ASCII, Arabic-Indic, fullwidth, …; mixing families raises `D3131`),
+  Roman numerals (`i`/`I`), letter sequences (`a`/`A`), and spelled-out words
+  (`w`/`W`/`Ww`). Other numbering-sequence forms are unsupported (`D3130`).
   """
 
   alias Jsonata.Error
@@ -32,6 +33,49 @@ defmodule Jsonata.Format do
   ]
 
   @roman_values %{?M => 1000, ?D => 500, ?C => 100, ?L => 50, ?X => 10, ?V => 5, ?I => 1}
+
+  # The zero codepoint of each Unicode decimal-digit family (a family is ten
+  # consecutive codepoints). A digit in the picture selects the output family;
+  # `0x30` is ASCII. Ported verbatim from jsonata-js `datetime.js` `decimalGroups`.
+  @digit_families [
+    0x30,
+    0x0660,
+    0x06F0,
+    0x07C0,
+    0x0966,
+    0x09E6,
+    0x0A66,
+    0x0AE6,
+    0x0B66,
+    0x0BE6,
+    0x0C66,
+    0x0CE6,
+    0x0D66,
+    0x0DE6,
+    0x0E50,
+    0x0ED0,
+    0x0F20,
+    0x1040,
+    0x1090,
+    0x17E0,
+    0x1810,
+    0x1946,
+    0x19D0,
+    0x1A80,
+    0x1A90,
+    0x1B50,
+    0x1BB0,
+    0x1C40,
+    0x1C50,
+    0xA620,
+    0xA8D0,
+    0xA900,
+    0xA9D0,
+    0xA9F0,
+    0xAA50,
+    0xABF0,
+    0xFF10
+  ]
 
   # spelled-out word -> numeric value (lower-case keys), for $parseInteger
   @word_values (
@@ -115,7 +159,24 @@ defmodule Jsonata.Format do
 
   defp parse_value(value, %{primary: :decimal} = format) do
     digits = if format.ordinal, do: String.slice(value, 0..-3//1), else: value
-    digits |> strip_separators(format.grouping) |> String.to_integer()
+
+    digits
+    |> from_digit_family(Map.get(format, :zero_code) || ?0)
+    |> strip_separators(format.grouping)
+    |> String.to_integer()
+  end
+
+  # Maps a family's digits back to ASCII so the value can be parsed as an integer.
+  defp from_digit_family(digits, ?0), do: digits
+
+  defp from_digit_family(digits, zero_code) do
+    offset = zero_code - ?0
+    upper = zero_code + 9
+
+    digits
+    |> String.to_charlist()
+    |> Enum.map(fn c -> if c >= zero_code and c <= upper, do: c - offset, else: c end)
+    |> List.to_string()
   end
 
   # --- picture analysis -----------------------------------------------------
@@ -145,18 +206,23 @@ defmodule Jsonata.Format do
   end
 
   defp analyse_decimal(picture, ordinal) do
-    {mandatory, optional, separators} =
+    {mandatory, optional, separators, zero} =
       picture
       |> String.to_charlist()
       |> Enum.reverse()
-      |> Enum.reduce({0, 0, []}, fn code, {mandatory, optional, separators} ->
+      |> Enum.reduce({0, 0, [], nil}, fn code, {mandatory, optional, separators, zero} ->
         # a separator sits after this many digit slots (counted from the right)
         position = mandatory + optional
 
         cond do
-          code in ?0..?9 -> {mandatory + 1, optional, separators}
-          code == ?# -> {mandatory, optional + 1, separators}
-          true -> {mandatory, optional, [{position, <<code::utf8>>} | separators]}
+          family = digit_family(code) ->
+            {mandatory + 1, optional, separators, merge_family(zero, family, picture)}
+
+          code == ?# ->
+            {mandatory, optional + 1, separators, zero}
+
+          true ->
+            {mandatory, optional, [{position, <<code::utf8>>} | separators], zero}
         end
       end)
 
@@ -169,9 +235,18 @@ defmodule Jsonata.Format do
       mandatory_digits: mandatory,
       optional_digits: optional,
       grouping: grouping(Enum.reverse(separators)),
-      ordinal: ordinal
+      ordinal: ordinal,
+      zero_code: zero
     }
   end
+
+  # The family-zero codepoint a digit belongs to, or `nil` if `code` is not a
+  # decimal-digit-sign. Every picture digit must share one family, else D3131.
+  defp digit_family(code), do: Enum.find(@digit_families, &(code >= &1 and code <= &1 + 9))
+
+  defp merge_family(nil, family, _picture), do: family
+  defp merge_family(family, family, _picture), do: family
+  defp merge_family(_other, _family, picture), do: raise(Error.new("D3131", value: picture))
 
   # Grouping separators are "regular" when they are evenly spaced and identical.
   defp grouping([]), do: :none
@@ -202,7 +277,17 @@ defmodule Jsonata.Format do
   defp format_value(value, %{primary: :decimal} = format) do
     digits = value |> Integer.to_string() |> String.pad_leading(format.mandatory_digits, "0")
     digits = insert_grouping(digits, format.grouping)
-    if format.ordinal, do: digits <> ordinal_suffix(digits), else: digits
+    digits = if format.ordinal, do: digits <> ordinal_suffix(digits), else: digits
+    to_digit_family(digits, Map.get(format, :zero_code) || ?0)
+  end
+
+  # Offsets ASCII digits into the picture's digit family (a no-op for ASCII);
+  # grouping/ordinal characters are left untouched.
+  defp to_digit_family(digits, ?0), do: digits
+
+  defp to_digit_family(digits, zero_code) do
+    offset = zero_code - ?0
+    String.replace(digits, ~r/[0-9]/, fn <<d>> -> <<d + offset::utf8>> end)
   end
 
   defp apply_case(string, :upper), do: String.upcase(string)
