@@ -4,15 +4,14 @@ defmodule Jsonata.Functions do
   its signature and an implementation taking the validated argument list.
 
   Covers aggregation, numeric, string, array/object, boolean, and control
-  functions; the regex matchers (`$match` and the regex forms of `$contains`/
-  `$split`/`$replace`); higher-order functions (`$map`, `$filter`, `$reduce`,
-  `$single`, `$sift`, `$each`, comparator `$sort`); the date/time functions
-  (`$fromMillis`/`$toMillis`/`$now`/`$millis`, `$formatBase`, including date/time
-  picture-string formatting and parsing via `Jsonata.DateTimePicture`); the
-  integer picture strings `$formatInteger`/`$parseInteger` (`Jsonata.Format`); and
-  `$formatNumber` (DecimalFormat — `Jsonata.FormatNumber`).
-
-  The `$match` custom-matcher protocol is not yet implemented.
+  functions; the regex matchers and the custom-matcher protocol (`$match` and the
+  regex/function forms of `$contains`/`$split`/`$replace`); higher-order functions
+  (`$map`, `$filter`, `$reduce`, `$single`, `$sift`, `$each`, comparator `$sort`);
+  the date/time functions (`$fromMillis`/`$toMillis`/`$now`/`$millis`,
+  `$formatBase`, including date/time picture-string formatting and parsing via
+  `Jsonata.DateTimePicture`); the integer picture strings
+  `$formatInteger`/`$parseInteger` (`Jsonata.Format`); and `$formatNumber`
+  (DecimalFormat — `Jsonata.FormatNumber`).
   """
 
   alias Jsonata.{Environment, Error, Function, Object, Sequence, Signature, Value}
@@ -109,8 +108,9 @@ defmodule Jsonata.Functions do
       {"base64decode", "<s-:s>", fn args -> str1(args, &Base.decode64!/1) end},
       {"encodeUrlComponent", "<s-:s>", fn args -> str1(args, &encode_component/1) end},
       {"encodeUrl", "<s-:s>", fn args -> str1(args, &encode_url/1) end},
-      {"decodeUrlComponent", "<s-:s>", fn args -> str1(args, &URI.decode/1) end},
-      {"decodeUrl", "<s-:s>", fn args -> str1(args, &URI.decode/1) end},
+      {"decodeUrlComponent", "<s-:s>",
+       fn args -> str1(args, &decode_url(&1, "decodeUrlComponent")) end},
+      {"decodeUrl", "<s-:s>", fn args -> str1(args, &decode_url(&1, "decodeUrl")) end},
       # --- array / object ---
       {"append", "<xx:a>", &append/1},
       {"reverse", "<a:a>", &reverse/1},
@@ -232,7 +232,12 @@ defmodule Jsonata.Functions do
   defp each([map, func]) when is_map(map) do
     map
     |> Object.pairs()
-    |> Enum.map(fn {key, value} -> call_hof(func, value, key, map) end)
+    |> Enum.flat_map(fn {key, value} ->
+      case call_hof(func, value, key, map) do
+        @undefined -> []
+        result -> [result]
+      end
+    end)
     |> Sequence.from_value()
   end
 
@@ -704,6 +709,26 @@ defmodule Jsonata.Functions do
 
   defp encode_component(string), do: URI.encode(string, &URI.char_unreserved?/1)
   defp encode_url(string), do: URI.encode(string)
+
+  # Mirrors JS decodeURI/decodeURIComponent, which throw a URIError (→ D3140)
+  # when an escape is malformed or the decoded bytes are not valid UTF-8.
+  defp decode_url(string, name) do
+    decoded = if valid_escapes?(string), do: URI.decode(string), else: :invalid
+
+    if decoded != :invalid and String.valid?(decoded),
+      do: decoded,
+      else: raise(Error.new("D3140", token: name, value: string))
+  end
+
+  defguardp is_hex(byte) when byte in ?0..?9 or byte in ?a..?f or byte in ?A..?F
+
+  defp valid_escapes?(<<>>), do: true
+
+  defp valid_escapes?(<<?%, h1, h2, rest::binary>>) when is_hex(h1) and is_hex(h2),
+    do: valid_escapes?(rest)
+
+  defp valid_escapes?(<<?%, _::binary>>), do: false
+  defp valid_escapes?(<<_, rest::binary>>), do: valid_escapes?(rest)
 
   # --- array / object -------------------------------------------------------
 

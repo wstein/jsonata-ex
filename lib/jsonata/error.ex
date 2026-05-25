@@ -110,6 +110,7 @@ defmodule Jsonata.Error do
     "D3136" =>
       "The date/time picture string is missing specifiers required to parse the timestamp",
     "D3137" => "{{message}}",
+    "D3140" => "Malformed URL passed to ${{token}}(): {{value}}",
     "D3141" => "{{message}}",
     # host-level (non-JSONata) resource limit from `Jsonata.evaluate/4` options
     "U1001" => "Evaluation exceeded the configured resource limit ({{value}})"

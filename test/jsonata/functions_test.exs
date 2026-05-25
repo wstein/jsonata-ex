@@ -245,6 +245,13 @@ defmodule Jsonata.FunctionsTest do
       assert eval(~s|$encodeUrl("http://x.com/a b")|) =~ "%20"
       assert eval(~s|$decodeUrl("a%20b")|) == "a b"
     end
+
+    test "decoding a malformed URL escape raises D3140" do
+      assert %Error{code: "D3140"} = eval_error(~s|$decodeUrl("%E0%A4%A")|)
+      assert %Error{code: "D3140"} = eval_error(~s|$decodeUrlComponent("%E0%A4%A")|)
+      # an incomplete trailing escape, even when the bytes would be valid ASCII
+      assert %Error{code: "D3140"} = eval_error(~s|$decodeUrlComponent("%4")|)
+    end
   end
 
   describe "object helpers" do

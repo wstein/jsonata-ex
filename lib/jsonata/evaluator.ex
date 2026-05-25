@@ -308,8 +308,21 @@ defmodule Jsonata.Evaluator do
     proc = eval_val(expr.procedure, input, env)
     args = Enum.map(expr.arguments, fn arg -> wrap_argument(eval_val(arg, input, env), input) end)
     args = if applyto == :none, do: args, else: [applyto | args]
-    apply_function(proc, args, input, expr.position)
+
+    proc
+    |> apply_function(args, input, expr.position)
+    |> apply_keep_array(expr)
   end
+
+  # A trailing `[]` on a function call (`… ~> $map(f)[]`) promotes a singleton
+  # result to a one-element array, mirroring the keep-singleton path rule.
+  defp apply_keep_array(@undefined, _expr), do: @undefined
+  defp apply_keep_array(%Sequence{} = seq, %{keep_array: true}), do: %{seq | keep_singleton: true}
+
+  defp apply_keep_array(value, %{keep_array: true}),
+    do: Sequence.singleton(value, keep_singleton: true)
+
+  defp apply_keep_array(result, _expr), do: result
 
   # A function passed as an argument is wrapped as a closure so higher-order
   # functions (in Jsonata.Functions) can apply it without depending on the evaluator.

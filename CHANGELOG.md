@@ -21,9 +21,12 @@ the upstream language-agnostic conformance suite (~98% of specified cases pass).
   (`Jsonata.Signature`), including `$shuffle`; `$number` parses hex/binary/octal
   literals; `$round`/`$formatBase` use decimal-correct round-half-to-even;
   lambdas with closures and self-recursion; higher-order functions
-  (`$map`/`$filter`/`$reduce`/`$single`/`$sift`/`$each`, comparator `$sort`); the
-  `~>` apply/compose operator; partial application (`?`); and chained assignment
-  (`$a := $b := 5` binds both).
+  (`$map`/`$filter`/`$reduce`/`$single`/`$sift`/`$each` — the latter dropping
+  `undefined` results — comparator `$sort`); the `~>` apply/compose operator
+  (a trailing `[]` keeps a singleton result as an array); partial application
+  (`?`); chained assignment (`$a := $b := 5` binds both); and
+  `$decodeUrl`/`$decodeUrlComponent` raising `D3140` on a malformed escape or
+  invalid UTF-8.
 - **Operators** — `and`/`or` short-circuit on the left operand; the range `..`
   accepts integer-valued float bounds; wildcard `*` iterates array elements;
   regex matchers (`$match` and the regex forms of `$contains`/`$split`/

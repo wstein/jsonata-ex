@@ -245,6 +245,23 @@ defmodule Jsonata.EvaluatorTest do
       assert eval(~s|($after := $substringAfter(?, "@"); $after("u@ex.com"))|) == "ex.com"
       assert eval("($add := function($a, $b){$a + $b}; $add5 := $add(5, ?); $add5(10))") == 15
     end
+
+    test "$each drops undefined results" do
+      assert eval("$each($, function($v, $k){ $k[$v > 2] })", %{
+               "a" => 1,
+               "b" => 2,
+               "c" => 3,
+               "d" => 4
+             }) == ["c", "d"]
+    end
+
+    test "a trailing [] on a function application keeps a singleton as an array" do
+      assert eval("( $data := [1]; $square := function($x){$x*$x}; $data ~> $map($square)[] )") ==
+               [1]
+
+      assert eval("( $data := [1,2]; $square := function($x){$x*$x}; $data ~> $map($square)[] )") ==
+               [1, 4]
+    end
   end
 
   describe "order-by and group-by" do
