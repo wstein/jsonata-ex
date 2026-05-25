@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 A native Elixir port of [JSONata](https://jsonata.org/) v2.2.1, validated against
-the upstream language-agnostic conformance suite (~94% of specified cases pass).
+the upstream language-agnostic conformance suite (~95% of specified cases pass).
 
 ### Added
 
@@ -23,9 +23,10 @@ the upstream language-agnostic conformance suite (~94% of specified cases pass).
   `$sort`), the `~>` apply/compose operator, and partial application (`?`).
 - **Operators** — regex matchers (`$match` and the regex forms of
   `$contains`/`$split`/`$replace`), order-by `^`, group-by `{`, the positional
-  tuple-stream operators focus `@` / index `#` (joins), and the parent operator
+  tuple-stream operators focus `@` / index `#` (joins), the parent operator
   `%` — the slot/ancestry resolution that binds an ancestor step's context
-  through the tuple stream (including through blocks and predicates).
+  through the tuple stream (including through blocks and predicates) — and the
+  transform `|pattern|update[,delete]|` operator (`T2011`/`T2012` validation).
 - **Date/time** — `$fromMillis`/`$toMillis` (ISO 8601), `$now`/`$millis`, and
   `$formatBase`. Date/time picture-string formatting **and parsing**
   (`$fromMillis`/`$now`/`$toMillis`, `Jsonata.DateTimePicture`): the
@@ -53,6 +54,5 @@ the upstream language-agnostic conformance suite (~94% of specified cases pass).
 
 ### Not yet implemented
 
-- The **transform** `|…|` operator and order-sensitive object key handling
-  (`$keys`/`$spread`/`$each`).
+- Order-sensitive object key handling (`$keys`/`$spread`/`$each`).
 - JavaScript-style **async** functions (out of scope for the synchronous engine).

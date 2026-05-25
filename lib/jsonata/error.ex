@@ -46,6 +46,10 @@ defmodule Jsonata.Error do
       "The values {{value}} and {{value2}} either side of operator {{token}} must be of the same data type",
     "T2010" =>
       "The expressions either side of operator {{token}} must evaluate to numeric or string values",
+    "T2011" =>
+      "The insert/update clause of the transform expression must evaluate to an object: {{value}}",
+    "T2012" =>
+      "The delete clause of the transform expression must evaluate to a string or array of strings: {{value}}",
     "D2014" =>
       "The size of the sequence allocated by the range operator (..) must not exceed 1e7.  Attempted to allocate {{value}}.",
     "D2015" => "The maximum sequence length of {{value}} was exceeded.",

@@ -13,9 +13,9 @@ defmodule Jsonata.Evaluator do
   variables (Phase 2); function invocation, lambdas with closures and
   self-recursion, the `~>` apply/compose operator, higher-order functions, regex
   matchers, `$eval`, order-by `^`, grouping `{`, partial application `?`, the
-  positional tuple-stream operators focus `@` / index `#`, and the parent
-  operator `%` (which reuses the tuple stream to bind ancestor contexts). Not
-  yet evaluated: the transform `|` operator.
+  positional tuple-stream operators focus `@` / index `#`, the parent operator
+  `%` (which reuses the tuple stream to bind ancestor contexts), and the
+  transform `|…|` operator.
   """
 
   alias Jsonata.{Environment, Error, Function, Functions, Sequence, Signature, Value}
@@ -101,6 +101,9 @@ defmodule Jsonata.Evaluator do
   defp eval_node(%{type: :function} = expr, input, env),
     do: {evaluate_function(expr, input, env, :none), env}
 
+  defp eval_node(%{type: :transform} = expr, _input, env),
+    do: {make_transformer(expr, env), env}
+
   defp eval_node(%{type: :lambda} = expr, input, env), do: {make_lambda(expr, input, env), env}
 
   defp eval_node(%{type: :partial} = expr, input, env),
@@ -137,6 +140,86 @@ defmodule Jsonata.Evaluator do
 
     filled
   end
+
+  # `|pattern|update[,delete]|` becomes a function that returns a copy of its
+  # argument with `update` merged into (and `delete` removed from) each node the
+  # `pattern` matches. JSONata mutates a clone by reference; we rebuild instead,
+  # keying the changes by the matched node's value.
+  defp make_transformer(expr, env) do
+    %Function{name: "transform", arity: 1, impl: fn args -> transform(expr, hd(args), env) end}
+  end
+
+  defp transform(_expr, @undefined, _env), do: @undefined
+
+  defp transform(expr, obj, env) do
+    changes =
+      expr.pattern
+      |> eval_val(obj, env)
+      |> match_list()
+      |> Map.new(fn match -> {match, transform_change(expr, match, env)} end)
+
+    apply_transform(obj, changes)
+  end
+
+  defp match_list(@undefined), do: []
+  defp match_list(%Sequence{} = seq), do: Enum.to_list(seq)
+  defp match_list(matches) when is_list(matches), do: matches
+  defp match_list(match), do: [match]
+
+  defp transform_change(expr, match, env) do
+    update = validate_update(eval_val(expr.update, match, env))
+
+    delete =
+      case Map.fetch(expr, :delete) do
+        {:ok, ast} -> validate_delete(eval_val(ast, match, env))
+        :error -> @undefined
+      end
+
+    {update, delete}
+  end
+
+  defp validate_update(@undefined), do: @undefined
+  defp validate_update(update) when is_map(update) and not is_struct(update), do: update
+  defp validate_update(update), do: raise(Error.new("T2011", value: jstringify(update)))
+
+  defp validate_delete(@undefined), do: @undefined
+  defp validate_delete(key) when is_binary(key), do: [key]
+
+  defp validate_delete(keys) when is_list(keys) do
+    if Enum.all?(keys, &is_binary/1),
+      do: keys,
+      else: raise(Error.new("T2012", value: jstringify(keys)))
+  end
+
+  defp validate_delete(other), do: raise(Error.new("T2012", value: jstringify(other)))
+
+  defp jstringify(value), do: Functions.jstring(value)
+
+  # rebuild the tree, applying a change to every node equal to a matched node;
+  # children are rebuilt first so a nested match's update is preserved
+  defp apply_transform(node, changes) do
+    rebuilt = transform_children(node, changes)
+
+    case Map.fetch(changes, node) do
+      {:ok, change} -> apply_change(rebuilt, change)
+      :error -> rebuilt
+    end
+  end
+
+  defp transform_children(node, changes) when is_map(node) and not is_struct(node),
+    do: Map.new(node, fn {key, value} -> {key, apply_transform(value, changes)} end)
+
+  defp transform_children(node, changes) when is_list(node),
+    do: Enum.map(node, &apply_transform(&1, changes))
+
+  defp transform_children(node, _changes), do: node
+
+  defp apply_change(node, {update, delete}) when is_map(node) and not is_struct(node) do
+    node = if is_map(update), do: Map.merge(node, update), else: node
+    if is_list(delete), do: Map.drop(node, delete), else: node
+  end
+
+  defp apply_change(node, _change), do: node
 
   defp make_lambda(expr, input, env) do
     %Function{

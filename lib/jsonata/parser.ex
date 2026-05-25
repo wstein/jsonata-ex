@@ -11,9 +11,8 @@ defmodule Jsonata.Parser do
 
   Scope: the full expression grammar — paths, predicates, operators,
   conditionals, blocks, binds, array/object constructors, ranges, functions,
-  lambdas, order-by `^`, grouping `{`, focus `@`, index `#`, and the parent
-  operator `%` (with its slot/ancestry resolution). The transform `|…|` operator
-  is not yet parsed.
+  lambdas, order-by `^`, grouping `{`, focus `@`, index `#`, the parent operator
+  `%` (with its slot/ancestry resolution), and the transform `|…|` operator.
   """
 
   alias Jsonata.{Error, Token, Tokenizer}
@@ -165,6 +164,30 @@ defmodule Jsonata.Parser do
     {items, state} = array_items(state, [])
     state = advance(state, "]", true)
     {%{type: :unary, value: "[", expressions: items, position: t.position}, state}
+  end
+
+  # Object transformer: | pattern | update [, delete] |
+  defp nud(%{id: "|"} = t, state) do
+    {pattern, state} = expression(state, 0)
+    state = advance(state, "|", true)
+    {update, state} = expression(state, 0)
+
+    {node, state} =
+      if state.tok.id == "," do
+        {delete, state} = expression(advance(state, ","), 0)
+
+        {%{
+           type: :transform,
+           pattern: pattern,
+           update: update,
+           delete: delete,
+           position: t.position
+         }, state}
+      else
+        {%{type: :transform, pattern: pattern, update: update, position: t.position}, state}
+      end
+
+    {node, advance(state, "|", true)}
   end
 
   # Object constructor: { k: v, ... }
@@ -755,6 +778,11 @@ defmodule Jsonata.Parser do
     args = Enum.map(expr.arguments, &process_ast/1)
     result = %{expr | procedure: process_ast(expr.procedure), arguments: args}
     Enum.reduce(args, result, &push_ancestry(&2, &1))
+  end
+
+  defp process_ast(%{type: :transform} = expr) do
+    expr = %{expr | pattern: process_ast(expr.pattern), update: process_ast(expr.update)}
+    maybe_process(expr, :delete)
   end
 
   defp process_ast(%{type: :lambda} = expr), do: %{expr | body: process_ast(expr.body)}
