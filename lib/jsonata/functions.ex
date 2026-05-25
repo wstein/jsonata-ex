@@ -459,15 +459,23 @@ defmodule Jsonata.Functions do
   defp replace([string, pattern, replacement]),
     do: replace([string, pattern, replacement, @undefined])
 
+  # the limit, if given, must be non-negative
+  defp replace([_string, _pattern, _replacement, limit]) when is_number(limit) and limit < 0,
+    do: raise(Error.new("D3011", value: limit))
+
+  # regex pattern, string replacement (with $0/$$/$N substitution)
   defp replace([string, %Function{regex: regex}, replacement, limit])
        when is_binary(replacement) do
-    replacement = String.replace(replacement, ~r/\$(\d)/, "\\\\\\1")
-
-    case limit do
-      @undefined -> Regex.replace(regex, string, replacement)
-      n -> Regex.replace(regex, string, replacement, global: trunc(n) > 1)
-    end
+    replace_regex(string, regex, &substitute(replacement, &1), limit)
   end
+
+  # regex pattern, function replacement (called per match; must return a string)
+  defp replace([string, %Function{regex: regex}, %Function{} = fun, limit]) do
+    replace_regex(string, regex, &call_replacer(fun, &1), limit)
+  end
+
+  # literal string pattern — an empty pattern is an error
+  defp replace([_string, "", _replacement, _limit]), do: raise(Error.new("D3010"))
 
   defp replace([string, pattern, replacement, limit])
        when is_binary(pattern) and is_binary(replacement) do
@@ -483,6 +491,83 @@ defmodule Jsonata.Functions do
     case :binary.split(string, pattern) do
       [before, rest] -> before <> replacement <> replace_n(rest, pattern, replacement, n - 1)
       [whole] -> whole
+    end
+  end
+
+  # Apply `replacer` (string-substitution or a function) to the first `limit`
+  # regex matches, splicing the result back into `string` (character offsets).
+  defp replace_regex(string, regex, replacer, limit) do
+    matches = regex |> regex_matches(string) |> take_limit(limit)
+
+    {parts, last} =
+      Enum.reduce(matches, {[], 0}, fn match, {acc, pos} ->
+        start = match["index"]
+        before = String.slice(string, pos, start - pos)
+        {[acc, before, replacer.(match)], start + String.length(match["match"])}
+      end)
+
+    IO.iodata_to_binary([parts, String.slice(string, last..-1//1)])
+  end
+
+  defp call_replacer(%Function{} = fun, match) do
+    case fun.impl.([match]) do
+      result when is_binary(result) -> result
+      other -> raise Error.new("D3012", value: jstring(other))
+    end
+  end
+
+  # JSONata `$N` substitution (ported from functions.js): `$$` → `$`, `$0` → the
+  # whole match, `$N` → group N (greedy up to the group-count's digit width, with
+  # backoff), out-of-range/non-digit → literal.
+  defp substitute(replacement, match) do
+    groups = match["groups"]
+    max_digits = if groups == [], do: 1, else: floor(:math.log10(length(groups))) + 1
+    substitute(replacement, match["match"], groups, max_digits, [])
+  end
+
+  defp substitute("", _whole, _groups, _max, acc), do: IO.iodata_to_binary(Enum.reverse(acc))
+
+  defp substitute("$$" <> rest, whole, groups, max, acc),
+    do: substitute(rest, whole, groups, max, ["$" | acc])
+
+  defp substitute("$0" <> rest, whole, groups, max, acc),
+    do: substitute(rest, whole, groups, max, [whole | acc])
+
+  defp substitute("$" <> rest, whole, groups, max, acc) do
+    case leading_int(rest, max) do
+      nil ->
+        substitute(rest, whole, groups, max, ["$" | acc])
+
+      {index, _digits} ->
+        index =
+          if max > 1 and index > length(groups),
+            do: elem(leading_int(rest, max - 1) || {index, 0}, 0),
+            else: index
+
+        consumed = String.length(Integer.to_string(index))
+        value = if groups == [], do: "", else: group_at(groups, index)
+        substitute(String.slice(rest, consumed..-1//1), whole, groups, max, [value | acc])
+    end
+  end
+
+  defp substitute(<<char::utf8, rest::binary>>, whole, groups, max, acc),
+    do: substitute(rest, whole, groups, max, [<<char::utf8>> | acc])
+
+  # the leading run of digits in `string` (up to `width` chars) as {int, digit_count}, or nil
+  defp leading_int(string, width) do
+    digits = string |> String.slice(0, width) |> take_leading_digits()
+    if digits == "", do: nil, else: {String.to_integer(digits), String.length(digits)}
+  end
+
+  defp take_leading_digits(<<d, rest::binary>>) when d in ?0..?9,
+    do: <<d>> <> take_leading_digits(rest)
+
+  defp take_leading_digits(_other), do: ""
+
+  defp group_at(groups, index) do
+    case Enum.at(groups, index - 1) do
+      value when value in [nil, @undefined] -> ""
+      value -> value
     end
   end
 

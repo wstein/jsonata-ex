@@ -83,9 +83,12 @@ host and the JavaScript reference legitimately differ.
   returns `9.33…e157`. Non-integer results still use floats and render with the
   same ECMAScript rules (`1e21` → `"1e+21"`, 15-significant-digit `$string`
   rounding). The divergence only shows for integer results beyond 2⁵³.
-- **Regex uses Erlang's `:re` (PCRE), not V8.** Patterns valid in both behave
-  identically, but engine-specific syntax, some named-group and flag handling,
-  and a few edge constructs differ between PCRE and V8.
+- **Regex uses Erlang's `:re` (PCRE), not V8.** The whole `regex` conformance
+  group passes, so common patterns and `$match`/`$contains`/`$split`/`$replace`
+  (including `$0`/`$$`/`$N` substitution, match limits, and function
+  replacements) behave identically. Untested-but-possible engine differences
+  remain for `$replace` named-group substitution (`$<name>`), lookbehind, the
+  sticky `y` flag, `\d`/`\w` Unicode semantics, and `\uXXXX` vs `\x{…}` escapes.
 - **`~> | … |` transform** rebuilds the tree (jsonata-js mutates a clone by
   reference) but matches by **identity**: each object node is stamped with a
   unique tag before the pattern runs, so only the specifically-matched node is
@@ -93,7 +96,7 @@ host and the JavaScript reference legitimately differ.
   (e.g. `(a.b)[0]`). No observable divergence.
 
 The whole upstream conformance suite is run as a CI gate
-(`mix test --only conformance`); the current score is **~96.5%**, and the gaps
+(`mix test --only conformance`); the current score is **~98%**, and the gaps
 above account for most of the remainder.
 
 ## Development

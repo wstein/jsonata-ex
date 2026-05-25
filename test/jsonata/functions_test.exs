@@ -309,6 +309,27 @@ defmodule Jsonata.FunctionsTest do
       assert eval(~s|$replace("2024-01", /(\\d+)-(\\d+)/, "$2/$1")|) == "01/2024"
     end
 
+    test "$replace substitution: $0 (whole match) and $$ (literal dollar)" do
+      assert eval(~s|$replace("265USD", /([0-9]+)USD/, "$$$1")|) == "$265"
+      assert eval(~s|$replace("265USD", /([0-9]+)USD/, "$0 -> $$$1")|) == "265USD -> $265"
+    end
+
+    test "$replace honours a match limit (and limit 0 is a no-op)" do
+      assert eval(~s|$replace("ababbxabbcc", /b+/, "yy", 2)|) == "ayyayyxabbcc"
+      assert eval(~s|$replace("ababbxabbcc", /b+/, "yy", 0)|) == "ababbxabbcc"
+      assert %Error{code: "D3011"} = eval_error(~s|$replace("x", /x/, "y", -1)|)
+    end
+
+    test "$replace with an out-of-range group leaves trailing digits literal" do
+      assert eval(~s|$replace("abcdefghijklmno", /(ijk)/, "$8$5$12$12$18$123")|) ==
+               "abcdefghijk2ijk2ijk8ijk23lmno"
+    end
+
+    test "$replace with a function replacement is applied per match" do
+      assert eval(~s|$replace("a1b2", /[0-9]/, function($m) { $m.match & "!" })|) == "a1!b2!"
+      assert %Error{code: "D3012"} = eval_error(~s|$replace("hat", /hat/, function($m) { 42 })|)
+    end
+
     test "a regex literal is callable and matches the first occurrence" do
       assert eval(~s|/o/("foo")|) == %{"match" => "o", "index" => 1, "groups" => []}
     end

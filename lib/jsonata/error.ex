@@ -61,6 +61,9 @@ defmodule Jsonata.Error do
     "T1005" => "Attempted to invoke a non-function. Did you mean ${{token}}?",
     "T1006" => "Attempted to invoke a non-function",
     "D3001" => "Attempting to invoke string function on Infinity or NaN",
+    "D3010" => "Second argument of replace function cannot be an empty string",
+    "D3011" => "Fourth argument of replace function must evaluate to a positive number",
+    "D3012" => "Attempted to replace a matched string with a non-string value",
     "D3030" => "Unable to cast value to a number: {{value}}",
     "D3060" => "The sqrt function cannot be applied to a negative number: {{value}}",
     "D3061" =>
