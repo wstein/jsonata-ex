@@ -45,6 +45,19 @@ defmodule Jsonata do
   Returns `{:ok, result}` where a missing result is `:undefined`, or
   `{:error, %Jsonata.Error{}}` for a parse or evaluation error.
 
+  ## Options
+
+  For untrusted expressions/input, `opts` can bound evaluation by running it in
+  an isolated process:
+
+    * `:max_heap_size` — kill the evaluation if its heap exceeds this many words
+    * `:timeout` — kill it if it runs longer than this many milliseconds
+
+  Either limit being breached returns `{:error, %Jsonata.Error{code: "U1001"}}`.
+  When neither is set, evaluation runs inline (no process overhead). Host
+  functions and the input are copied to the isolated process, so a host function
+  that relies on shared process state will not see it there.
+
   ## Examples
 
       iex> Jsonata.evaluate("a + b", %{"a" => 1, "b" => 2})
@@ -56,15 +69,19 @@ defmodule Jsonata do
       iex> Jsonata.evaluate("$double(21)", :undefined, %{"double" => fn n -> n * 2 end})
       {:ok, 42}
 
+      iex> match?({:error, %Jsonata.Error{code: "U1001"}},
+      ...>   Jsonata.evaluate("[1..1e7]", :undefined, %{}, max_heap_size: 100_000))
+      true
+
   """
-  @spec evaluate(binary() | Expression.t(), term(), bindings()) ::
+  @spec evaluate(binary() | Expression.t(), term(), bindings(), keyword()) ::
           {:ok, term()} | {:error, Error.t()}
-  def evaluate(expression, input \\ :undefined, bindings \\ %{})
+  def evaluate(expression, input \\ :undefined, bindings \\ %{}, opts \\ [])
 
-  def evaluate(%Expression{ast: ast}, input, bindings), do: run(ast, input, bindings)
+  def evaluate(%Expression{ast: ast}, input, bindings, opts), do: run(ast, input, bindings, opts)
 
-  def evaluate(expression, input, bindings) when is_binary(expression) do
-    with {:ok, ast} <- Parser.parse(expression), do: run(ast, input, bindings)
+  def evaluate(expression, input, bindings, opts) when is_binary(expression) do
+    with {:ok, ast} <- Parser.parse(expression), do: run(ast, input, bindings, opts)
   end
 
   @doc ~S"""
@@ -92,7 +109,14 @@ defmodule Jsonata do
     end
   end
 
-  defp run(ast, input, bindings) do
+  defp run(ast, input, bindings, opts) do
+    case Keyword.take(opts, [:max_heap_size, :timeout]) do
+      [] -> run_inline(ast, input, bindings)
+      limits -> run_guarded(ast, input, bindings, limits)
+    end
+  end
+
+  defp run_inline(ast, input, bindings) do
     env =
       Enum.reduce(bindings, Functions.bind_all(Environment.root(input)), fn {name, value}, env ->
         Environment.bind(env, name, host_value(name, value))
@@ -103,6 +127,36 @@ defmodule Jsonata do
     {:ok, Jsonata.Object.to_plain(Evaluator.evaluate(ast, input, env))}
   rescue
     error in Error -> {:error, error}
+  end
+
+  # Runs evaluation in an isolated, optionally heap-capped/time-limited process
+  # so untrusted input cannot exhaust the caller's heap or hang it.
+  defp run_guarded(ast, input, bindings, limits) do
+    parent = self()
+    timeout = Keyword.get(limits, :timeout, :infinity)
+    max_heap = Keyword.get(limits, :max_heap_size)
+
+    {pid, ref} =
+      spawn_monitor(fn ->
+        if max_heap do
+          Process.flag(:max_heap_size, %{size: max_heap, kill: true, error_logger: false})
+        end
+
+        send(parent, {:jsonata_result, run_inline(ast, input, bindings)})
+      end)
+
+    receive do
+      {:jsonata_result, result} ->
+        Process.demonitor(ref, [:flush])
+        result
+
+      {:DOWN, ^ref, :process, _pid, _reason} ->
+        {:error, Error.new("U1001", value: "max_heap_size")}
+    after
+      timeout ->
+        Process.exit(pid, :kill)
+        {:error, Error.new("U1001", value: "timeout")}
+    end
   end
 
   # An Elixir function bound as a variable becomes a callable JSONata function.

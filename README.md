@@ -25,6 +25,15 @@ Jsonata.evaluate(~JSONATA"$uppercase(name)", %{"name" => "bob"})
 # Extend the language: an Elixir function bound as a variable is a callable $fn
 Jsonata.evaluate("$double(21)", :undefined, %{"double" => fn n -> n * 2 end})
 #=> {:ok, 42}
+
+# Bound untrusted expressions/input with a heap and/or time limit (S8)
+Jsonata.evaluate("[1..1e9]", :undefined, %{}, max_heap_size: 100_000, timeout: 1_000)
+#=> {:error, %Jsonata.Error{code: "U1001"}}
+
+# Decode JSON preserving object key order, so $keys/$spread/$each see it (ADR-3)
+{:ok, data} = Jsonata.decode(~s({"b": 1, "a": 2}))
+Jsonata.evaluate("$keys($)", data)
+#=> {:ok, ["b", "a"]}
 ```
 
 Input is plain decoded JSON (string-keyed maps, lists, scalars, `nil`). A missing
@@ -77,11 +86,11 @@ host and the JavaScript reference legitimately differ.
 - **Regex uses Erlang's `:re` (PCRE), not V8.** Patterns valid in both behave
   identically, but engine-specific syntax, some named-group and flag handling,
   and a few edge constructs differ between PCRE and V8.
-- **`~> | … |` transform matches by value, not reference.** jsonata-js mutates a
-  clone of the matched nodes by reference; the immutable port rebuilds the tree,
-  keying each match's update/delete by the matched node's *value*. Results are
-  identical unless two structurally-equal sibling objects are selected
-  positionally (e.g. `(a.b)[0]`) — then both equal nodes receive the update.
+- **`~> | … |` transform** rebuilds the tree (jsonata-js mutates a clone by
+  reference) but matches by **identity**: each object node is stamped with a
+  unique tag before the pattern runs, so only the specifically-matched node is
+  updated — even when structurally-equal siblings are selected positionally
+  (e.g. `(a.b)[0]`). No observable divergence.
 
 The whole upstream conformance suite is run as a CI gate
 (`mix test --only conformance`); the current score is **~96.5%**, and the gaps

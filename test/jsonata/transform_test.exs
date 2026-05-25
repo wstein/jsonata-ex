@@ -70,6 +70,25 @@ defmodule Jsonata.TransformTest do
     assert second["Description"] == %{"Colour" => "Orange"}
   end
 
+  test "matches are identified by position, not value (identical siblings)" do
+    # two structurally-equal objects; `[0]` selects only the first — value-equality
+    # matching would have updated both
+    {:ok, result} =
+      Jsonata.evaluate(
+        ~S'$ ~> |items[0]|{"tag": "X"}|',
+        %{"items" => [%{"v" => 1}, %{"v" => 1}]}
+      )
+
+    assert result == %{"items" => [%{"v" => 1, "tag" => "X"}, %{"v" => 1}]}
+  end
+
+  test "a nested match composes under its parent's update" do
+    {:ok, result} =
+      Jsonata.evaluate(~S'$ ~> |**[v=1]|{"hit": true}|', %{"v" => 1, "child" => %{"v" => 1}})
+
+    assert result == %{"v" => 1, "hit" => true, "child" => %{"v" => 1, "hit" => true}}
+  end
+
   test "a non-object update raises T2011" do
     assert {:error, %Error{code: "T2011"}} = Jsonata.evaluate(~S'Account ~> |Order|5|', @data)
   end

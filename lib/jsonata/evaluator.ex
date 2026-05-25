@@ -154,13 +154,47 @@ defmodule Jsonata.Evaluator do
   defp transform(_expr, @undefined, _env), do: @undefined
 
   defp transform(expr, obj, env) do
+    # tag every object node with a unique id so the pattern's matches are
+    # identified by position (identity), not by value — this means two
+    # structurally-equal sibling objects are distinguished, matching the
+    # reference implementation's by-reference mutation. The ids are invisible to
+    # JSONata and dropped at the output boundary.
+    {tagged, _next} = tag_objects(obj, 0)
+
     changes =
       expr.pattern
-      |> eval_val(obj, env)
+      |> eval_val(tagged, env)
       |> match_list()
-      |> Map.new(fn match -> {match, transform_change(expr, match, env)} end)
+      |> Enum.reduce(%{}, fn match, acc ->
+        case match do
+          %Object{id: id} when not is_nil(id) ->
+            Map.put(acc, id, transform_change(expr, match, env))
 
-    apply_transform(obj, changes)
+          _other ->
+            acc
+        end
+      end)
+
+    apply_transform(tagged, changes)
+  end
+
+  defp tag_objects(value, counter) do
+    cond do
+      Object.object?(value) ->
+        {pairs, counter} =
+          Enum.map_reduce(Object.pairs(value), counter, fn {key, val}, count ->
+            {tagged, count} = tag_objects(val, count)
+            {{key, tagged}, count}
+          end)
+
+        {%{Object.new(pairs) | id: counter}, counter + 1}
+
+      is_list(value) ->
+        Enum.map_reduce(value, counter, fn item, count -> tag_objects(item, count) end)
+
+      true ->
+        {value, counter}
+    end
   end
 
   defp match_list(@undefined), do: []
@@ -198,48 +232,35 @@ defmodule Jsonata.Evaluator do
 
   defp jstringify(value), do: Functions.jstring(value)
 
-  # rebuild the tree, applying a change to every node equal to a matched node;
-  # children are rebuilt first so a nested match's update is preserved
-  defp apply_transform(node, changes) do
-    rebuilt = transform_children(node, changes)
+  # rebuild the tree; a node whose id is in `changes` gets its update/delete
+  # applied. Children are rebuilt first so a nested match composes under its
+  # parent. Keying by id (not value) updates exactly the matched node.
+  defp apply_transform(%Object{id: id} = node, changes) do
+    rebuilt =
+      Object.new(Enum.map(Object.pairs(node), fn {k, v} -> {k, apply_transform(v, changes)} end))
 
-    case Map.fetch(changes, node) do
+    case Map.fetch(changes, id) do
       {:ok, change} -> apply_change(rebuilt, change)
       :error -> rebuilt
     end
   end
 
-  defp transform_children(%Object{} = node, changes),
-    do:
-      Object.new(Enum.map(Object.pairs(node), fn {k, v} -> {k, apply_transform(v, changes)} end))
-
-  defp transform_children(node, changes) when is_map(node) and not is_struct(node),
-    do: Map.new(node, fn {key, value} -> {key, apply_transform(value, changes)} end)
-
-  defp transform_children(node, changes) when is_list(node),
+  defp apply_transform(node, changes) when is_list(node),
     do: Enum.map(node, &apply_transform(&1, changes))
 
-  defp transform_children(node, _changes), do: node
+  defp apply_transform(node, _changes), do: node
 
-  # merge the update's pairs in, then drop the deleted keys — order-preserving
-  # for an Object node, content-only for a plain map
-  defp apply_change(node, {update, delete}) do
-    if Object.object?(node) do
-      node = if Object.object?(update), do: apply_update_pairs(node, update), else: node
-      if is_list(delete), do: drop_keys(node, delete), else: node
-    else
-      node
-    end
+  # merge the update's pairs into the (tagged) Object node, in order, then drop
+  # the deleted keys (the rebuild always yields an Object, so node is one)
+  defp apply_change(%Object{} = node, {update, delete}) do
+    node = if Object.object?(update), do: apply_update_pairs(node, update), else: node
+    if is_list(delete), do: drop_keys(node, delete), else: node
   end
 
   defp apply_update_pairs(%Object{} = node, update),
     do: Enum.reduce(Object.pairs(update), node, fn {k, v}, acc -> Object.put(acc, k, v) end)
 
-  defp apply_update_pairs(node, update) when is_map(node),
-    do: Enum.reduce(Object.pairs(update), node, fn {k, v}, acc -> Map.put(acc, k, v) end)
-
   defp drop_keys(%Object{} = node, keys), do: Enum.reduce(keys, node, &Object.delete(&2, &1))
-  defp drop_keys(node, keys) when is_map(node), do: Map.drop(node, keys)
 
   defp make_lambda(expr, input, env) do
     %Function{

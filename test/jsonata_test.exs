@@ -42,4 +42,32 @@ defmodule JsonataTest do
       assert {:error, %Error{}} = Jsonata.evaluate("a +", %{})
     end
   end
+
+  describe "evaluate/4 resource limits (S8)" do
+    test "max_heap_size kills a runaway evaluation" do
+      assert {:error, %Error{code: "U1001"}} =
+               Jsonata.evaluate("[1..1e7]", :undefined, %{}, max_heap_size: 50_000)
+    end
+
+    test "timeout kills a long-running evaluation" do
+      expr = "($f := function($n){$n = 0 ? 0 : $f($n - 1)}; $f(50000000))"
+
+      assert {:error, %Error{code: "U1001"}} =
+               Jsonata.evaluate(expr, :undefined, %{}, timeout: 200)
+    end
+
+    test "a within-limit evaluation returns normally, host functions included" do
+      assert {:ok, 5050} =
+               Jsonata.evaluate("$sum([1..100])", :undefined, %{}, max_heap_size: 268_435_456)
+
+      assert {:ok, 42} =
+               Jsonata.evaluate("$double(21)", :undefined, %{"double" => fn n -> n * 2 end},
+                 timeout: 1_000
+               )
+    end
+
+    test "no limits runs inline (no behaviour change)" do
+      assert {:ok, 3} = Jsonata.evaluate("a + b", %{"a" => 1, "b" => 2}, [])
+    end
+  end
 end

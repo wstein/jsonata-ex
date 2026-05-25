@@ -56,6 +56,12 @@ the upstream language-agnostic conformance suite (~97% of specified cases pass).
   insertion order (`Jsonata.Object`), so `$keys`/`$spread`/`$each`/`$string`
   match jsonata-js. `Jsonata.decode/1` decodes JSON input preserving object key
   order; results are still plain Elixir maps at the boundary.
+- **Transform matches by identity** — `~> |…|` stamps each object node with a
+  unique tag before the pattern runs and keys updates by it, so a positionally
+  selected node among structurally-equal siblings is updated alone.
+- **Resource-bounded evaluation** — `Jsonata.evaluate/4` accepts `max_heap_size`
+  (words) and/or `timeout` (ms); breaching either runs the evaluation in an
+  isolated process that is killed, returning `{:error, %Error{code: "U1001"}}`.
 - **Host integration** — `$eval`, and registering Elixir functions as callable
   `$fn` via `Jsonata.evaluate/3` bindings.
 - **Tooling** — `credo --strict`, `dialyzer` (clean), 90%+ test coverage, and

@@ -13,10 +13,18 @@ defmodule Jsonata.Object do
   converted back to plain maps at the public output boundary via `to_plain/1`.
   """
 
+  # `id` is an optional, JSONata-invisible identity tag (not a logical key): the
+  # transform operator stamps it so it can update the *specific* matched node by
+  # position rather than by value. It is ignored by every read function and by
+  # equality, and dropped by `to_plain/1`.
   @enforce_keys [:keys, :map]
-  defstruct keys: [], map: %{}
+  defstruct keys: [], map: %{}, id: nil
 
-  @type t :: %__MODULE__{keys: [String.t()], map: %{optional(String.t()) => term()}}
+  @type t :: %__MODULE__{
+          keys: [String.t()],
+          map: %{optional(String.t()) => term()},
+          id: term()
+        }
 
   @doc "An empty ordered object."
   @spec new() :: t()
