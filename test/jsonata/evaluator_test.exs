@@ -314,4 +314,29 @@ defmodule Jsonata.EvaluatorTest do
       assert eval("L@$l.R@$r[$r.lid = $l.id].$r", data) == :undefined
     end
   end
+
+  describe "index (#) tuple-stream long-tail" do
+    @nums [3, 1, 4, 1, 5, 9]
+
+    test "index on a bare variable filters by the bound position" do
+      assert eval("$#$pos[$pos<3]", @nums) == [3, 1, 4]
+    end
+
+    test "index on a bare name binds the position of each element" do
+      assert eval("a#$pos[$pos<3]", %{"a" => @nums}) == [3, 1, 4]
+    end
+
+    test "sort immediately followed by index numbers the sorted stream" do
+      assert eval("$^($)#$pos[$pos<3]", @nums) == [1, 1, 3]
+    end
+
+    test "a trailing [] keeps a singleton result as an array" do
+      assert eval("$#$pos[$pos<3][1][]", @nums) == [1]
+    end
+
+    test "[] before further predicates and sort still promotes a singleton" do
+      assert eval("$#$pos[][$pos<3]^($)[-1]", @nums) == [4]
+      assert eval("$#$pos[$pos<3]^($)[-1][]", @nums) == [4]
+    end
+  end
 end

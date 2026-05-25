@@ -673,7 +673,7 @@ defmodule Jsonata.Parser do
     filter = %{type: :filter, expr: predicate, position: expr.position}
     stages = Map.get(step, key, []) ++ [filter]
     step = step |> Map.put(key, stages) |> transfer_keep_array(expr) |> push_ancestry(predicate)
-    replace_last_step(result, step, key)
+    result |> replace_last_step(step, key) |> flag_keep_singleton()
   end
 
   defp process_ast(%{type: :binary, value: ":="} = expr) do
@@ -713,18 +713,36 @@ defmodule Jsonata.Parser do
     Map.put(result, :group, %{lhs: pairs, position: expr.position})
   end
 
-  # Focus (@) / index (#) binding: flag the last step as a tuple step.
-  defp process_ast(%{type: :binary, value: bind_op} = expr) when bind_op in ["@", "#"] do
+  # Focus (@) binding: flag the last step as a focus tuple step. A focus may not
+  # follow a predicate/stage on the same step (S0215).
+  defp process_ast(%{type: :binary, value: "@"} = expr) do
     result = process_ast(expr.lhs)
     {step, _key} = predicate_target(result)
 
-    if bind_op == "@" and (Map.has_key?(step, :stages) or Map.has_key?(step, :predicate)) do
+    if Map.has_key?(step, :stages) or Map.has_key?(step, :predicate) do
       raise Error, code: "S0215", position: expr.position
     end
 
-    key = if bind_op == "@", do: :focus, else: :index
-    step = step |> Map.put(key, expr.rhs.value) |> Map.put(:tuple, true)
+    step = step |> Map.put(:focus, expr.rhs.value) |> Map.put(:tuple, true)
     replace_last_step(result, step, :stages)
+  end
+
+  # Index (#) binding: bind the position of the last step. A bare node is wrapped
+  # in a path (so the tuple machinery runs); any predicate on it becomes a stage.
+  # When the step already carries stages, the index binds as an ordered stage so
+  # it numbers the stream at the right pipeline position (multi-`#` composites);
+  # otherwise it is a plain step field bound as each output tuple is produced.
+  defp process_ast(%{type: :binary, value: "#"} = expr) do
+    result = process_ast(expr.lhs)
+
+    {result, step} =
+      case result do
+        %{type: :path, steps: steps} -> {result, List.last(steps)}
+        bare -> wrap_index_step(bare)
+      end
+
+    step = step |> index_step(expr.rhs.value) |> transfer_keep_array(expr)
+    result |> replace_last_step(step, :stages) |> flag_keep_singleton()
   end
 
   defp process_ast(%{type: :binary} = expr) do
@@ -811,6 +829,23 @@ defmodule Jsonata.Parser do
   defp predicate_target(%{type: :path, steps: steps}), do: {List.last(steps), :stages}
   defp predicate_target(step), do: {step, :predicate}
 
+  # Wrap a bare `#` step in a single-step path; a predicate on the bare node moves
+  # to stages so the index can bind after it. Returns `{path, step}`.
+  defp wrap_index_step(%{predicate: predicate} = step) do
+    step = step |> Map.put(:stages, predicate) |> Map.delete(:predicate)
+    {%{type: :path, steps: [step]}, step}
+  end
+
+  defp wrap_index_step(step), do: {%{type: :path, steps: [step]}, step}
+
+  defp index_step(%{stages: stages} = step, index_value) do
+    stage = %{type: :index, value: index_value}
+    %{step | stages: stages ++ [stage]} |> Map.put(:tuple, true)
+  end
+
+  defp index_step(step, index_value),
+    do: step |> Map.put(:index, index_value) |> Map.put(:tuple, true)
+
   defp as_path(%{type: :path} = path), do: path
   defp as_path(step), do: %{type: :path, steps: [step]}
 
@@ -838,6 +873,8 @@ defmodule Jsonata.Parser do
       result
     end
   end
+
+  defp flag_keep_singleton(result), do: result
 
   defp flag_cons_arrays(%{steps: steps} = result) do
     steps =

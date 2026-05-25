@@ -641,6 +641,21 @@ defmodule Jsonata.Evaluator do
   # and binds a position. The first tuple step seeds tuples from the input.
   # (A sort step only reaches here once already in tuple mode — i.e. `tuples`
   # is a list — because outside tuple mode it is handled by evaluate_step/4.)
+  # The sort is the first tuple step (e.g. `$^(…)#$i`): sort the plain input and
+  # seed tuples from it, binding the index position if the step carries one.
+  defp evaluate_tuple_step(%{type: :sort} = step, input_seq, :none, env) do
+    value_fn = fn expr, item -> eval_val(expr, item, env) end
+
+    tuples =
+      input_seq
+      |> Enum.to_list()
+      |> sort_by_terms(step.terms, value_fn)
+      |> Enum.with_index()
+      |> Enum.map(fn {item, position} -> seed_sort_tuple(step, item, position) end)
+
+    apply_tuple_stages(step, tuples, env)
+  end
+
   defp evaluate_tuple_step(%{type: :sort} = step, _input_seq, tuples, env) do
     value_fn = fn expr, tuple -> eval_val(expr, tuple["@"], frame_from_tuple(env, tuple)) end
     apply_tuple_stages(step, sort_by_terms(tuples, step.terms, value_fn), env)
@@ -656,6 +671,9 @@ defmodule Jsonata.Evaluator do
     result = Enum.flat_map(bindings, &expand_tuple(step, &1, env))
     apply_tuple_stages(step, result, env)
   end
+
+  defp seed_sort_tuple(%{index: index}, item, position), do: %{"@" => item, index => position}
+  defp seed_sort_tuple(_step, item, _position), do: %{"@" => item}
 
   defp expand_tuple(step, tuple, env) do
     case eval_val(step, tuple["@"], frame_from_tuple(env, tuple)) do
@@ -712,6 +730,11 @@ defmodule Jsonata.Evaluator do
         keep_item?(eval_val(predicate, tuple["@"], frame_from_tuple(env, tuple)), index, count),
         do: tuple
   end
+
+  # `#` as an ordered stage numbers the current stream at this pipeline position
+  # (used for multi-`#` composites where the index follows a focus/filter stage).
+  defp apply_tuple_stage(%{type: :index, value: name}, tuples, _env),
+    do: tuples |> Enum.with_index() |> Enum.map(fn {tuple, i} -> Map.put(tuple, name, i) end)
 
   # --- predicates / stages --------------------------------------------------
 

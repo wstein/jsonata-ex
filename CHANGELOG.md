@@ -33,8 +33,10 @@ the upstream language-agnostic conformance suite (~98% of specified cases pass).
   `undefined | {match, start, end, groups, next}` — where `next` is a zero-arg
   iterator — accepted by `$match`/`$contains`/`$split`/`$replace`, with `T1010`
   for a malformed result), order-by `^`,
-  group-by `{`, the positional
-  tuple-stream operators focus `@` / index `#` (joins), the parent operator
+  group-by `{`, the positional tuple-stream operators focus `@` / index `#` —
+  including index on a bare node (`$#$i`/`a#$i`), index after a sort
+  (`$^(…)#$i`), index as an ordered stage in multi-`#` composites, and the
+  trailing-`[]` singleton-array promotion through these joins — the parent operator
   `%` — the slot/ancestry resolution that binds an ancestor step's context
   through the tuple stream (including through blocks and predicates) — and the
   transform `|pattern|update[,delete]|` operator (`T2011`/`T2012` validation).
