@@ -63,11 +63,13 @@ mix credo --strict
 mix test --cover
 mix dialyzer
 mix docs
+mix run bench/jsonata_bench.exs   # Benchee micro-benchmarks
 ```
 
-The conformance suite lives in the sibling `jsonata` submodule. When present,
-`Jsonata.Conformance.load/0` enumerates every upstream case; integration tests
-that depend on it skip gracefully when the submodule is not checked out.
+The conformance suite lives in the sibling `jsonata` submodule. Its loader,
+`Jsonata.Conformance` (in `test/support`, so it is not shipped in the package),
+enumerates every upstream case; integration tests that depend on it skip
+gracefully when the submodule is not checked out.
 
 ## License
 

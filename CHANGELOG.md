@@ -56,6 +56,10 @@ the upstream language-agnostic conformance suite (~97% of specified cases pass).
   `$fn` via `Jsonata.evaluate/3` bindings.
 - **Tooling** — `credo --strict`, `dialyzer` (clean), 90%+ test coverage, and
   StreamData property tests, all enforced in CI.
+- **Release prep** — MIT `LICENSE`; a Hex package (`mix.exs` metadata, explicit
+  `files` excluding the test-only conformance loader, now in `test/support`);
+  ExDoc with `README`/`CHANGELOG`/`LICENSE`; and Benchee micro-benchmarks
+  (`bench/jsonata_bench.exs`).
 
 ### Not yet implemented
 
