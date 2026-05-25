@@ -23,8 +23,9 @@ the upstream language-agnostic conformance suite (~98% of specified cases pass).
   lambdas with closures and self-recursion; higher-order functions
   (`$map`/`$filter`/`$reduce`/`$single`/`$sift`/`$each` — the latter dropping
   `undefined` results — comparator `$sort`); the `~>` apply/compose operator
-  (a trailing `[]` keeps a singleton result as an array); partial application
-  (`?`); chained assignment (`$a := $b := 5` binds both); and
+  (a trailing `[]` keeps a singleton result as an array; composing two
+  partially-applied functions collapses the intermediate sequence); partial
+  application (`?`); chained assignment (`$a := $b := 5` binds both); and
   `$decodeUrl`/`$decodeUrlComponent` raising `D3140` on a malformed escape or
   invalid UTF-8.
 - **Operators** — `and`/`or` short-circuit on the left operand; the range `..`

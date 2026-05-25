@@ -262,6 +262,16 @@ defmodule Jsonata.EvaluatorTest do
       assert eval("( $data := [1,2]; $square := function($x){$x*$x}; $data ~> $map($square)[] )") ==
                [1, 4]
     end
+
+    test "composing two partial applications collapses the intermediate sequence" do
+      assert eval("""
+             ( $times := function($x, $y){ $x * $y };
+               $product := $reduce(?, $times);
+               $square := function($x){ $x * $x };
+               $product_of_squares := $map(?, $square) ~> $product;
+               [1..5] ~> $product_of_squares() )
+             """) == 14_400
+    end
   end
 
   describe "order-by and group-by" do
@@ -288,6 +298,16 @@ defmodule Jsonata.EvaluatorTest do
       ]
 
       assert eval("p{type: n}", %{"p" => phones}) == %{"home" => ["1", "3"], "mobile" => "2"}
+    end
+
+    test "a trailing [] on a group-by value keeps a singleton group as an array" do
+      phones = [
+        %{"type" => "home", "n" => "1"},
+        %{"type" => "mobile", "n" => "2"},
+        %{"type" => "home", "n" => "3"}
+      ]
+
+      assert eval("p{type: n[]}", %{"p" => phones}) == %{"home" => ["1", "3"], "mobile" => ["2"]}
     end
 
     test "object constructor drops keys whose value is nothing" do

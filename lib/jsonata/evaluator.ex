@@ -358,9 +358,17 @@ defmodule Jsonata.Evaluator do
     %Function{
       name: "composed",
       arity: 1,
-      impl: fn args -> apply_function(g, [apply_function(f, args, nil, nil)], nil, nil) end
+      # collapse the intermediate result to a plain JSONata value, as a normal
+      # `~>` step does via finalize, so `g` (e.g. an array built-in) does not
+      # receive a raw tuple/sequence struct
+      impl: fn args ->
+        apply_function(g, [collapse_value(apply_function(f, args, nil, nil))], nil, nil)
+      end
     }
   end
+
+  defp collapse_value(%Sequence{} = seq), do: Sequence.collapse(seq, false)
+  defp collapse_value(value), do: value
 
   # Lambdas carry both `body` and (since creation) `impl`; check `body` first so a
   # direct call validates once, while built-ins/wrapped args/compositions (no body)
@@ -818,6 +826,15 @@ defmodule Jsonata.Evaluator do
     seq = if Map.get(expr, :keep_array, false), do: %{seq | keep_singleton: true}, else: seq
     Sequence.collapse(seq, false)
   end
+
+  # a trailing `[]` on a non-path leaf (e.g. a bare `name[]`, common as a
+  # group-by value) keeps a present singleton as a one-element array; lists,
+  # tuple streams, and the nothing value are left unchanged
+  defp finalize(%{keep_array: true}, value)
+       when is_list(value) or value == @undefined or is_struct(value, Sequence),
+       do: value
+
+  defp finalize(%{keep_array: true}, value), do: [value]
 
   defp finalize(_expr, value), do: value
 
