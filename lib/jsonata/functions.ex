@@ -394,6 +394,7 @@ defmodule Jsonata.Functions do
   end
 
   defp substring_before([@undefined | _]), do: @undefined
+  defp substring_before([_string, ""]), do: ""
 
   defp substring_before([string, chars]) do
     case :binary.split(string, chars) do
@@ -403,6 +404,7 @@ defmodule Jsonata.Functions do
   end
 
   defp substring_after([@undefined | _]), do: @undefined
+  defp substring_after([string, ""]), do: string
 
   defp substring_after([string, chars]) do
     case :binary.split(string, chars) do
@@ -589,9 +591,17 @@ defmodule Jsonata.Functions do
   end
 
   defp keys([@undefined]), do: @undefined
-  defp keys([map]) when is_map(map), do: Map.keys(map)
-  defp keys([list]) when is_list(list), do: list |> Enum.flat_map(&object_keys/1) |> Enum.uniq()
+  defp keys([map]) when is_map(map) and not is_struct(map), do: keys_result(Map.keys(map))
+
+  defp keys([list]) when is_list(list),
+    do: list |> Enum.flat_map(&object_keys/1) |> Enum.uniq() |> keys_result()
+
   defp keys([_value]), do: @undefined
+
+  # no keys → undefined; a single key collapses to the bare string
+  defp keys_result([]), do: @undefined
+  defp keys_result([single]), do: single
+  defp keys_result(keys), do: keys
 
   defp object_keys(map) when is_map(map), do: Map.keys(map)
   defp object_keys(_value), do: []
@@ -617,7 +627,10 @@ defmodule Jsonata.Functions do
   defp lookup([_value, _key]), do: @undefined
 
   defp spread([@undefined]), do: @undefined
-  defp spread([map]) when is_map(map), do: Enum.map(map, fn {k, v} -> %{k => v} end)
+
+  defp spread([map]) when is_map(map) and not is_struct(map),
+    do: Enum.map(map, fn {k, v} -> %{k => v} end)
+
   defp spread([list]) when is_list(list), do: Enum.flat_map(list, &spread([&1]))
   defp spread([value]), do: value
 

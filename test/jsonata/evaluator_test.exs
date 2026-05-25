@@ -53,6 +53,7 @@ defmodule Jsonata.EvaluatorTest do
 
     test "wildcard and descendant" do
       assert eval("*", %{"a" => 1, "b" => 2}) == [1, 2]
+      assert eval("*", [1, 2, 3]) == [1, 2, 3]
       assert eval("**.Price", @account) == [10, 20, 5]
     end
   end
@@ -96,6 +97,12 @@ defmodule Jsonata.EvaluatorTest do
       assert eval(~s("" or "x")) == true
     end
 
+    test "and/or short-circuit so the unused side's errors don't raise" do
+      # the right side would raise (string > number / $number of a non-number)
+      assert eval(~s|"" = "" or $number("x") = 0|) == true
+      assert eval(~s|$type("s") = "number" and "s" > 10|) == false
+    end
+
     test "inclusion" do
       assert eval("2 in [1, 2, 3]") == true
       assert eval("5 in [1, 2, 3]") == false
@@ -122,6 +129,8 @@ defmodule Jsonata.EvaluatorTest do
     test "range" do
       assert eval("[1..5]") == [1, 2, 3, 4, 5]
       assert eval("[5..1]") == []
+      # integer-valued floats are valid range bounds
+      assert eval("[1..3e0]") == [1, 2, 3]
     end
 
     test "object constructor" do

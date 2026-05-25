@@ -3,7 +3,7 @@
 A native Elixir port of [JSONata](https://jsonata.org/), the JSON query and
 transformation language. This is a clean-room reimplementation tracking the
 reference implementation [`jsonata-js`](https://github.com/jsonata-js/jsonata)
-v2.2.1, validated against its language-agnostic conformance suite (~96% of
+v2.2.1, validated against its language-agnostic conformance suite (~97% of
 specified cases pass; see the gaps below).
 
 ## Usage

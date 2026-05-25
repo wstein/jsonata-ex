@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 A native Elixir port of [JSONata](https://jsonata.org/) v2.2.1, validated against
-the upstream language-agnostic conformance suite (~96% of specified cases pass).
+the upstream language-agnostic conformance suite (~97% of specified cases pass).
 
 ### Added
 
@@ -24,8 +24,10 @@ the upstream language-agnostic conformance suite (~96% of specified cases pass).
   (`$map`/`$filter`/`$reduce`/`$single`/`$sift`/`$each`, comparator `$sort`); the
   `~>` apply/compose operator; partial application (`?`); and chained assignment
   (`$a := $b := 5` binds both).
-- **Operators** — regex matchers (`$match` and the regex forms of
-  `$contains`/`$split`/`$replace`), order-by `^`, group-by `{`, the positional
+- **Operators** — `and`/`or` short-circuit on the left operand; the range `..`
+  accepts integer-valued float bounds; wildcard `*` iterates array elements;
+  regex matchers (`$match` and the regex forms of `$contains`/`$split`/
+  `$replace`), order-by `^`, group-by `{`, the positional
   tuple-stream operators focus `@` / index `#` (joins), the parent operator
   `%` — the slot/ancestry resolution that binds an ancestor step's context
   through the tuple stream (including through blocks and predicates) — and the

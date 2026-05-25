@@ -89,6 +89,11 @@ defmodule Jsonata.FunctionsTest do
       assert eval(~s|$substringAfter("a.b.c", ".")|) == "b.c"
     end
 
+    test "substringBefore/After with an empty separator" do
+      assert eval(~s|$substringBefore("Hola", "")|) == ""
+      assert eval(~s|$substringAfter("Hola", "")|) == "Hola"
+    end
+
     test "pad, contains, split, join, replace" do
       assert eval(~s|$pad("x", 3)|) == "x  "
       assert eval(~s|$pad("x", -3, "0")|) == "00x"
@@ -183,6 +188,17 @@ defmodule Jsonata.FunctionsTest do
 
     test "pad treats an empty padding character as a space" do
       assert eval(~s|$pad("foo", 5, "")|) == "foo  "
+    end
+
+    test "keys: empty/non-object yields undefined, a single key collapses" do
+      assert eval(~s|$keys({"foo": {}})|) == "foo"
+      assert eval("$keys({})") == :undefined
+      assert eval(~s|$keys(["foo", "bar"])|) == :undefined
+      assert eval("$keys(function(){1})") == :undefined
+    end
+
+    test "spread of a function is left intact (stringifies to empty)" do
+      assert eval("$string($spread(function($x){$x}))") == ""
     end
 
     test "exists and type" do

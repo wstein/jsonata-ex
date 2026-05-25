@@ -750,17 +750,20 @@ defmodule Jsonata.Evaluator do
 
   defp lookup(_input, _key), do: @undefined
 
-  defp evaluate_wildcard(input) when is_map(input) and not is_struct(input) do
-    Enum.reduce(input, Sequence.empty(), fn {_key, value}, acc ->
-      if is_list(value) do
-        Sequence.append_step(acc, flatten(value))
-      else
-        Sequence.append_step(acc, value)
-      end
+  defp evaluate_wildcard(input) when is_map(input) and not is_struct(input),
+    do: input |> Map.values() |> wildcard_values()
+
+  # an array is iterated like an object keyed by index (matches jsonata-js)
+  defp evaluate_wildcard(input) when is_list(input), do: wildcard_values(input)
+  defp evaluate_wildcard(_input), do: Sequence.empty()
+
+  defp wildcard_values(values) do
+    Enum.reduce(values, Sequence.empty(), fn value, acc ->
+      if is_list(value),
+        do: Sequence.append_step(acc, flatten(value)),
+        else: Sequence.append_step(acc, value)
     end)
   end
-
-  defp evaluate_wildcard(_input), do: Sequence.empty()
 
   defp evaluate_descendants(@undefined), do: @undefined
 
@@ -810,10 +813,14 @@ defmodule Jsonata.Evaluator do
 
   # --- binary ---------------------------------------------------------------
 
-  defp evaluate_binary(%{value: op} = expr, input, env) when op in ["and", "or"] do
-    lhs = eval_val(expr.lhs, input, env)
-    rhs = eval_val(expr.rhs, input, env)
-    boolean_op(op, lhs, rhs)
+  # `and`/`or` short-circuit on the left operand (so the right is not evaluated,
+  # and its errors not raised, when the left already decides the result)
+  defp evaluate_binary(%{value: "and"} = expr, input, env) do
+    boolize(eval_val(expr.lhs, input, env)) and boolize(eval_val(expr.rhs, input, env))
+  end
+
+  defp evaluate_binary(%{value: "or"} = expr, input, env) do
+    boolize(eval_val(expr.lhs, input, env)) or boolize(eval_val(expr.rhs, input, env))
   end
 
   defp evaluate_binary(%{value: op} = expr, input, env) do
@@ -829,9 +836,6 @@ defmodule Jsonata.Evaluator do
       "in" -> includes_op(lhs, rhs)
     end
   end
-
-  defp boolean_op("and", lhs, rhs), do: boolize(lhs) and boolize(rhs)
-  defp boolean_op("or", lhs, rhs), do: boolize(lhs) or boolize(rhs)
 
   defp numeric_op(_op, @undefined, _rhs, _pos), do: @undefined
   defp numeric_op(_op, _lhs, @undefined, _pos), do: @undefined
@@ -896,16 +900,32 @@ defmodule Jsonata.Evaluator do
   defp range_op(@undefined, _rhs), do: @undefined
   defp range_op(_lhs, @undefined), do: @undefined
 
-  defp range_op(lhs, rhs) when is_integer(lhs) and is_integer(rhs) do
-    cond do
-      lhs > rhs -> @undefined
-      rhs - lhs + 1 > 10_000_000 -> raise(Error, code: "D2014", value: rhs - lhs + 1)
-      true -> Sequence.from_value(Enum.to_list(lhs..rhs))
+  # both bounds must be integers, but integer-valued floats (e.g. `2e5`) qualify
+  defp range_op(lhs, rhs) do
+    case {range_int(lhs), range_int(rhs)} do
+      {:error, _} ->
+        raise(Error, code: "T2003", value: lhs)
+
+      {_, :error} ->
+        raise(Error, code: "T2004", value: rhs)
+
+      {low, high} when low > high ->
+        @undefined
+
+      {low, high} when high - low + 1 > 10_000_000 ->
+        raise(Error, code: "D2014", value: high - low + 1)
+
+      {low, high} ->
+        Sequence.from_value(Enum.to_list(low..high))
     end
   end
 
-  defp range_op(lhs, _rhs) when not is_integer(lhs), do: raise(Error, code: "T2003", value: lhs)
-  defp range_op(_lhs, rhs), do: raise(Error, code: "T2004", value: rhs)
+  defp range_int(value) when is_integer(value), do: value
+
+  defp range_int(value) when is_float(value),
+    do: if(Float.round(value) == value, do: trunc(value), else: :error)
+
+  defp range_int(_value), do: :error
 
   # --- unary ----------------------------------------------------------------
 
