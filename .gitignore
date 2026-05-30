@@ -31,4 +31,4 @@ erl_crash.dump
 
 # node_modules for the cross-runtime benchmark (run "npm install" there).
 /bench/cross_runtime/node_modules/
-jsonata
+/jsonata

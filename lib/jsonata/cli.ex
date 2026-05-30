@@ -6,6 +6,7 @@ defmodule Jsonata.CLI do
   @undefined :undefined
 
   # escript entry point — System.halt satisfies the no_return escript contract.
+  @spec main([String.t()]) :: no_return
   def main(argv), do: System.halt(execute(argv))
 
   # Testable entry point — returns the exit code without halting.
@@ -167,6 +168,7 @@ defmodule Jsonata.CLI do
     do: {bindings, Enum.reverse(acc)}
 
   # Throw-based exit so all CLI logic is testable without halting the VM.
+  @spec halt!(non_neg_integer()) :: no_return
   defp halt!(code), do: throw({:cli_exit, code})
 
   # -- Output formatting ------------------------------------------------------
