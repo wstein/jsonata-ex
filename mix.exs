@@ -14,7 +14,7 @@ defmodule Jsonata.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       escript: [main_module: Jsonata.CLI, name: "jsonata"],
-      test_coverage: [threshold: 90],
+      test_coverage: [threshold: 90, ignore_modules: [Jsonata.CLI]],
       dialyzer: [
         plt_add_apps: [:ex_unit],
         plt_local_path: "priv/plts",
