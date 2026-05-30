@@ -351,7 +351,7 @@ defmodule Jsonata.DateTimePictureTest do
       ts = 1_531_310_400_000
 
       assert {:error, %Jsonata.Error{code: "D3134"}} =
-               Jsonata.evaluate("$fromMillis(#{ts}, \"[Z00001]\", \"+0530\")")
+               Jsonata.evaluate(~s{$fromMillis(#{ts}, "[Z00001]", "+0530")})
     end
   end
 
@@ -478,7 +478,7 @@ defmodule Jsonata.DateTimePictureTest do
     # Line 606: resolve with empty component map -> :undefined
     # A picture made entirely of literals matches but produces no components.
     test "a pure-literal picture that matches returns :undefined" do
-      assert {:ok, :undefined} = Jsonata.evaluate("$toMillis(\"foo\", \"foo\")")
+      assert {:ok, :undefined} = Jsonata.evaluate(~s{$toMillis("foo", "foo")})
     end
 
     # Lines 620, 675: date_b path — picture with year [Y] and day-of-year [d]
@@ -492,20 +492,20 @@ defmodule Jsonata.DateTimePictureTest do
     # Line 649: default_components leading fill from now_millis
     # When only time components are present, the date is filled from the current time.
     test "time-only picture fills missing date components from now and returns a timestamp" do
-      assert {:ok, ts} = Jsonata.evaluate("$toMillis(\"12:00:00\", \"[H01]:[m01]:[s01]\")")
+      assert {:ok, ts} = Jsonata.evaluate(~s{$toMillis("12:00:00", "[H01]:[m01]:[s01]")})
       assert is_integer(ts)
     end
 
     # Line 660: D3136 — date_c (ISO week-month calendar) raises error
     test "ISO week-month calendar picture raises D3136" do
       assert {:error, %Jsonata.Error{code: "D3136"}} =
-               Jsonata.evaluate("$toMillis(\"2018-01-1\", \"[X0001]-[x01]-[w1]\")")
+               Jsonata.evaluate(~s{$toMillis("2018-01-1", "[X0001]-[x01]-[w1]")})
     end
 
     # Line 660: D3136 — date_d (ISO week-year + week-of-year) raises error
     test "ISO week-year + week-of-year picture raises D3136" do
       assert {:error, %Jsonata.Error{code: "D3136"}} =
-               Jsonata.evaluate("$toMillis(\"2018-01\", \"[X0001]-[W01]\")")
+               Jsonata.evaluate(~s{$toMillis("2018-01", "[X0001]-[W01]")})
     end
   end
 end

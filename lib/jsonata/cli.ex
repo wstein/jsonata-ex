@@ -12,11 +12,9 @@ defmodule Jsonata.CLI do
   @doc false
   @spec execute([String.t()]) :: non_neg_integer()
   def execute(argv) do
-    try do
-      do_execute(argv)
-    catch
-      {:cli_exit, code} -> code
-    end
+    do_execute(argv)
+  catch
+    {:cli_exit, code} -> code
   end
 
   defp do_execute(argv) do
@@ -65,23 +63,25 @@ defmodule Jsonata.CLI do
     check_exit = opts[:exit_status] || false
 
     exit_code =
-      Enum.reduce(inputs, 0, fn input, code ->
-        case Jsonata.evaluate(expression, input, bindings) do
-          {:ok, @undefined} ->
-            code
-
-          {:ok, result} ->
-            IO.puts(format_result(result, pretty, raw))
-            if check_exit and falsy?(result), do: 1, else: code
-
-          {:error, error} ->
-            IO.puts(:stderr, "jsonata: #{Exception.message(error)}")
-            halt!(5)
-        end
-      end)
+      Enum.reduce(inputs, 0, &eval_input(&1, &2, expression, bindings, pretty, raw, check_exit))
 
     if exit_code != 0, do: halt!(exit_code)
     0
+  end
+
+  defp eval_input(input, code, expression, bindings, pretty, raw, check_exit) do
+    case Jsonata.evaluate(expression, input, bindings) do
+      {:ok, @undefined} ->
+        code
+
+      {:ok, result} ->
+        IO.puts(format_result(result, pretty, raw))
+        if check_exit and falsy?(result), do: 1, else: code
+
+      {:error, error} ->
+        IO.puts(:stderr, "jsonata: #{Exception.message(error)}")
+        halt!(5)
+    end
   end
 
   defp get_inputs(_files, true), do: [nil]

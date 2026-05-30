@@ -86,7 +86,7 @@ defmodule Jsonata.DateTimeTest do
 
     test "$now([picture, timezone]) returns a formatted string" do
       # Exercises now([picture, timezone])
-      result = eval("$now(\"[Y]\", \"+0000\")")
+      result = eval(~s{$now("[Y]", "+0000")})
       assert is_binary(result)
       assert String.length(result) == 4
     end
