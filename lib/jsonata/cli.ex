@@ -1,14 +1,28 @@
 defmodule Jsonata.CLI do
   @moduledoc false
 
-  alias Jsonata.Sequence
+  alias Jsonata.{Function, Functions, Sequence}
 
   @undefined :undefined
 
-  def main(argv) do
+  # escript entry point — System.halt satisfies the no_return escript contract.
+  def main(argv), do: System.halt(execute(argv))
+
+  # Testable entry point — returns the exit code without halting.
+  @doc false
+  @spec execute([String.t()]) :: non_neg_integer()
+  def execute(argv) do
+    try do
+      do_execute(argv)
+    catch
+      {:cli_exit, code} -> code
+    end
+  end
+
+  defp do_execute(argv) do
     {bindings, argv} = extract_var_bindings(argv)
 
-    {opts, args, _invalid} =
+    {opts, args, invalid} =
       OptionParser.parse(argv,
         strict: [
           compact: :boolean,
@@ -21,16 +35,22 @@ defmodule Jsonata.CLI do
         aliases: [c: :compact, r: :raw_output, n: :null_input, e: :exit_status, h: :help]
       )
 
+    for {flag, _} <- invalid do
+      IO.puts(:stderr, "jsonata: unknown option #{flag}")
+    end
+
     cond do
       opts[:version] ->
         IO.puts("jsonata #{Jsonata.version()}")
+        0
 
       opts[:help] ->
         print_help()
+        0
 
       args == [] ->
         IO.puts(:stderr, "jsonata: no expression given. Try --help.")
-        System.halt(1)
+        halt!(1)
 
       true ->
         [expression | files] = args
@@ -56,11 +76,12 @@ defmodule Jsonata.CLI do
 
           {:error, error} ->
             IO.puts(:stderr, "jsonata: #{Exception.message(error)}")
-            System.halt(5)
+            halt!(5)
         end
       end)
 
-    if exit_code != 0, do: System.halt(exit_code)
+    if exit_code != 0, do: halt!(exit_code)
+    0
   end
 
   defp get_inputs(_files, true), do: [nil]
@@ -77,18 +98,19 @@ defmodule Jsonata.CLI do
       {:ok, contents} -> decode_json!(contents, path)
       {:error, reason} ->
         IO.puts(:stderr, "jsonata: #{path}: #{:file.format_error(reason)}")
-        System.halt(2)
+        halt!(2)
     end
   end
 
+  # Fix 3: Use Jsonata.decode to preserve object key insertion order.
   defp decode_json!(text, source) do
-    case JSON.decode(text) do
+    case Jsonata.decode(text) do
       {:ok, value} ->
         value
 
       {:error, _reason} ->
         IO.puts(:stderr, "jsonata: invalid JSON from #{source}")
-        System.halt(3)
+        halt!(3)
     end
   end
 
@@ -96,16 +118,31 @@ defmodule Jsonata.CLI do
   # since each flag takes two positional values (name, then value/json).
   defp extract_var_bindings(argv), do: extract_var_bindings(argv, %{}, [])
 
-  defp extract_var_bindings(["--arg", name, value | rest], bindings, acc),
-    do: extract_var_bindings(rest, Map.put(bindings, name, value), acc)
+  # Fix 4: Reject flag-like tokens as the value so --arg name --flag expr
+  # doesn't silently consume --flag as the variable's string value.
+  defp extract_var_bindings(["--arg", name, value | rest], bindings, acc) do
+    if String.starts_with?(value, "--") do
+      IO.puts(:stderr, "jsonata: --arg '#{name}': missing value (got flag '#{value}')")
+      halt!(1)
+    end
+
+    extract_var_bindings(rest, Map.put(bindings, name, value), acc)
+  end
 
   defp extract_var_bindings(["--argjson", name, json | rest], bindings, acc) do
+    if String.starts_with?(json, "--") do
+      IO.puts(:stderr, "jsonata: --argjson '#{name}': missing JSON value (got flag '#{json}')")
+      halt!(1)
+    end
+
     value =
       case JSON.decode(json) do
-        {:ok, v} -> v
+        {:ok, v} ->
+          v
+
         {:error, _} ->
           IO.puts(:stderr, "jsonata: --argjson #{name}: invalid JSON value")
-          System.halt(1)
+          halt!(1)
       end
 
     extract_var_bindings(rest, Map.put(bindings, name, value), acc)
@@ -113,12 +150,12 @@ defmodule Jsonata.CLI do
 
   defp extract_var_bindings(["--arg" | _], _bindings, _acc) do
     IO.puts(:stderr, "jsonata: --arg requires two arguments: name value")
-    System.halt(1)
+    halt!(1)
   end
 
   defp extract_var_bindings(["--argjson" | _], _bindings, _acc) do
     IO.puts(:stderr, "jsonata: --argjson requires two arguments: name json")
-    System.halt(1)
+    halt!(1)
   end
 
   defp extract_var_bindings([arg | rest], bindings, acc),
@@ -126,6 +163,9 @@ defmodule Jsonata.CLI do
 
   defp extract_var_bindings([], bindings, acc),
     do: {bindings, Enum.reverse(acc)}
+
+  # Throw-based exit so all CLI logic is testable without halting the VM.
+  defp halt!(code), do: throw({:cli_exit, code})
 
   # -- Output formatting ------------------------------------------------------
 
@@ -138,14 +178,22 @@ defmodule Jsonata.CLI do
   defp encode_json(nil, _, _), do: "null"
   defp encode_json(true, _, _), do: "true"
   defp encode_json(false, _, _), do: "false"
-  defp encode_json(n, _, _) when is_number(n), do: JSON.encode!(n)
+  # Fix 1a: delegate to the library's own number formatter so whole floats like
+  # 2.0 render as "2", matching JSONata's $string() and the JS reference output.
+  defp encode_json(n, _, _) when is_number(n), do: Functions.number_to_string(n)
   defp encode_json(s, _, _) when is_binary(s), do: JSON.encode!(s)
+  # Fix 1b: function values render as the empty JSON string (JS JSON.stringify
+  # behaviour for functions).
+  defp encode_json(%Function{}, _, _), do: "\"\""
 
   defp encode_json(list, pretty, depth) when is_list(list) do
     encode_container(list, "[", "]", pretty, depth, &encode_json(&1, pretty, depth + 1))
   end
 
-  defp encode_json(map, pretty, depth) when is_map(map) do
+  # Fix 1c: guard against structs — is_map/1 matches any struct, so without
+  # not is_struct/1 a leaked %Function{} or %Sequence{} would emit __struct__
+  # and internal field names as JSON keys.
+  defp encode_json(map, pretty, depth) when is_map(map) and not is_struct(map) do
     encode_container(Map.to_list(map), "{", "}", pretty, depth, fn {k, v} ->
       JSON.encode!(to_string(k)) <> if(pretty, do: ": ", else: ":") <> encode_json(v, pretty, depth + 1)
     end)
@@ -166,10 +214,9 @@ defmodule Jsonata.CLI do
     end
   end
 
-  defp falsy?(nil), do: true
-  defp falsy?(false), do: true
-  defp falsy?([]), do: true
-  defp falsy?(_), do: false
+  # Fix 2: delegate to the evaluator's own truth table so 0, "", and {} are
+  # correctly falsy, matching JSONata semantics and jq -e parity.
+  defp falsy?(value), do: !Functions.jboolean(value)
 
   defp print_help do
     IO.puts("""
