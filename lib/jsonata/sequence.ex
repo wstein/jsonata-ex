@@ -140,9 +140,13 @@ defmodule Jsonata.Sequence do
   defimpl Enumerable do
     def reduce(%{items: items}, acc, fun), do: Enumerable.reduce(items, acc, fun)
 
+    def member?(%{lazy: false, items: items}, value) when is_list(items),
+      do: {:ok, :lists.member(value, items)}
+
     def member?(%{lazy: false, items: items}, value), do: Enumerable.member?(items, value)
     def member?(%{lazy: true}, _value), do: {:error, __MODULE__}
 
+    def count(%{lazy: false, items: items}) when is_list(items), do: {:ok, length(items)}
     def count(%{lazy: false, items: items}), do: Enumerable.count(items)
     def count(%{lazy: true}), do: {:error, __MODULE__}
 
