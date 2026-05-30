@@ -13,6 +13,7 @@ defmodule Jsonata.MixProject do
       elixirc_options: [warnings_as_errors: true],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      escript: [main_module: Jsonata.CLI, name: "jsonata"],
       test_coverage: [threshold: 90],
       dialyzer: [
         plt_add_apps: [:ex_unit],

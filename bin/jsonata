@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ESCRIPT="$ROOT/jsonata"
+
+if [[ ! -f "$ESCRIPT" || "$ROOT/mix.exs" -nt "$ESCRIPT" ]]; then
+  (cd "$ROOT" && mix escript.build --quiet 1>&2)
+fi
+
+exec "$ESCRIPT" "$@"
