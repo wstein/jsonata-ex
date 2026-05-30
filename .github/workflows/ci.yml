@@ -20,7 +20,7 @@ jobs:
           - elixir: "1.18"
             otp: "28"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: erlef/setup-beam@v1
         with:
@@ -28,7 +28,7 @@ jobs:
           otp-version: ${{ matrix.otp }}
 
       - name: Restore deps and build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
