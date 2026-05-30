@@ -95,7 +95,9 @@ defmodule Jsonata.CLI do
 
   defp read_file(path) do
     case File.read(path) do
-      {:ok, contents} -> decode_json!(contents, path)
+      {:ok, contents} ->
+        decode_json!(contents, path)
+
       {:error, reason} ->
         IO.puts(:stderr, "jsonata: #{path}: #{:file.format_error(reason)}")
         halt!(2)
@@ -195,7 +197,8 @@ defmodule Jsonata.CLI do
   # and internal field names as JSON keys.
   defp encode_json(map, pretty, depth) when is_map(map) and not is_struct(map) do
     encode_container(Map.to_list(map), "{", "}", pretty, depth, fn {k, v} ->
-      JSON.encode!(to_string(k)) <> if(pretty, do: ": ", else: ":") <> encode_json(v, pretty, depth + 1)
+      JSON.encode!(to_string(k)) <>
+        if(pretty, do: ": ", else: ":") <> encode_json(v, pretty, depth + 1)
     end)
   end
 
