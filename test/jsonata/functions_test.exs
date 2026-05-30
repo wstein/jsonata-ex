@@ -407,6 +407,145 @@ defmodule Jsonata.FunctionsTest do
     end
   end
 
+  describe "higher-order functions with undefined input" do
+    test "$map returns undefined when array is undefined" do
+      assert eval("$map(missing, function($x){$x})", %{}) == :undefined
+    end
+
+    test "$filter returns undefined when array is undefined" do
+      assert eval("$filter(missing, function($x){true})", %{}) == :undefined
+    end
+
+    test "$single returns undefined when array is undefined" do
+      assert eval("$single(missing)", %{}) == :undefined
+    end
+
+    test "$reduce returns undefined when sequence is undefined" do
+      assert eval("$reduce(missing, function($a,$b){$a+$b})", %{}) == :undefined
+    end
+
+    test "$sift returns undefined when object is undefined" do
+      assert eval("$sift(missing, function($v){true})", %{}) == :undefined
+    end
+
+    test "$each returns undefined when object is undefined" do
+      assert eval("$each(missing, function($v,$k){$v})", %{}) == :undefined
+    end
+  end
+
+  describe "$single" do
+    test "returns the single matching element with predicate" do
+      assert eval("$single([1, 2, 5, 3], function($x){$x = 5})") == 5
+    end
+  end
+
+  describe "$reduce" do
+    test "2-arg form with no initial value" do
+      assert eval("$reduce([1,2,3], function($a,$b){$a+$b})") == 6
+    end
+
+    test "3-arg form with initial value" do
+      assert eval("$reduce([1,2,3], function($a,$b){$a+$b}, 10)") == 16
+    end
+
+    test "raises D3050 when function arity is less than 2" do
+      assert %Error{code: "D3050"} = eval_error("$reduce([1,2,3], function($a){$a})")
+    end
+
+    test "4-arity callback receives accumulator, item, index, and sequence" do
+      assert eval("$reduce([1,2], function($a,$b,$i,$s){$a+$b+$i}, 0)") == 4
+    end
+  end
+
+  describe "$sift" do
+    test "filters object entries by predicate" do
+      assert eval(~s|$sift({"a":1,"b":2,"c":3}, function($v,$k){$v > 1})|) == %{
+               "b" => 2,
+               "c" => 3
+             }
+    end
+
+    test "returns undefined when all entries are filtered out" do
+      assert eval(~s|$sift({"a":1,"b":2}, function($v){$v > 9})|) == :undefined
+    end
+  end
+
+  describe "$map with 3-arity callback" do
+    test "passes item, index, and array to callback" do
+      assert eval("$map([10,20,30], function($v,$i,$a){$i})") == [0, 1, 2]
+    end
+
+    test "undefined return from callback is excluded" do
+      assert eval("$map([1,2,3], function($x){$x > 1 ? $x})") == [2, 3]
+    end
+  end
+
+  describe "$number edge cases" do
+    test "undefined input returns undefined" do
+      assert eval("$number(missing)", %{}) == :undefined
+    end
+
+    test "number passthrough" do
+      assert eval("$number(5)") == 5
+      assert eval("$number(3.14)") == 3.14
+    end
+
+    test "invalid radix digits are not parsed as radix literals" do
+      assert %Error{code: "D3030"} = eval_error(~s|$number("0b2")|)
+    end
+  end
+
+  describe "$round edge cases" do
+    test "undefined input returns undefined" do
+      assert eval("$round(missing)", %{}) == :undefined
+    end
+
+    test "1-arg rounds to integer" do
+      assert eval("$round(5)") == 5
+      assert eval("$round(3.7)") == 4
+    end
+  end
+
+  describe "$power edge cases" do
+    test "undefined exponent returns undefined" do
+      assert eval("$power(5, missing)", %{}) == :undefined
+    end
+  end
+
+  describe "$formatBase 1-arg" do
+    test "defaults to base 10" do
+      assert eval("$formatBase(42)") == "42"
+    end
+  end
+
+  describe "$formatNumber" do
+    test "2-arg form applies picture string" do
+      assert eval(~s|$formatNumber(1234.5, "#,##0.00")|) == "1,234.50"
+    end
+  end
+
+  describe "$average" do
+    test "undefined input returns undefined" do
+      assert eval("$average(missing)", %{}) == :undefined
+    end
+  end
+
+  describe "$substring 2-arg" do
+    test "returns suffix from start index" do
+      assert eval(~s|$substring("hello world", 6)|) == "world"
+    end
+  end
+
+  describe "$pad edge cases" do
+    test "undefined input returns undefined" do
+      assert eval("$pad(missing, 5)", %{}) == :undefined
+    end
+
+    test "2-arg pads with spaces on the right" do
+      assert eval(~s|$pad("x", 5)|) == "x    "
+    end
+  end
+
   describe "edge cases" do
     test "number of false, string with prettify flag" do
       assert eval("$number(false)") == 0

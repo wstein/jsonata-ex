@@ -155,4 +155,19 @@ defmodule Jsonata.SequenceTest do
       assert Sequence.materialize(seq) == seq
     end
   end
+
+  describe "Enumerable fallbacks for lazy:false with non-list items" do
+    test "member? delegates to Enumerable when items is a non-list enumerable" do
+      # Use a MapSet whose Enumerable.member? returns {:ok, bool} so the fallback
+      # clause (lazy:false, non-list) is exercised without the error-module leak.
+      seq = %Jsonata.Sequence{items: MapSet.new([1, 2, 3]), lazy: false}
+      assert Enum.member?(seq, 2)
+      refute Enum.member?(seq, 9)
+    end
+
+    test "count delegates to Enumerable when items is a non-list enumerable" do
+      seq = %Jsonata.Sequence{items: MapSet.new([1, 2, 3]), lazy: false}
+      assert Enum.count(seq) == 3
+    end
+  end
 end

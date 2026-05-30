@@ -38,4 +38,63 @@ defmodule Jsonata.SignatureTest do
   test "supports choice and variadic parameters" do
     assert validate("<(sn)+:x>", [1, "a", 2]) == [1, "a", 2]
   end
+
+  describe "parse/1 edge cases" do
+    test "signature with no closing > returns empty params (line 57 fallback)" do
+      # pos reaches byte_size(signature) without hitting ":" or ">"
+      sig = Signature.parse("<")
+      assert sig.params == []
+    end
+
+    test "unknown symbol in signature is skipped (line 100 catch-all)" do
+      # '#' is not a recognized symbol; it should be skipped
+      sig = Signature.parse("<#n>")
+      assert length(sig.params) == 1
+      assert hd(sig.params).type == "n"
+    end
+
+    test "nested subtype <a<n>> exercises closing_bracket depth tracking" do
+      # Parsing '<' inside a signature triggers depth > 1 in closing_bracket
+      # covering the depth-decrement (line 118) and depth-increment (line 119) branches
+      sig = Signature.parse("<a<n>>")
+      assert length(sig.params) == 1
+      [param] = sig.params
+      assert param.type == "a"
+      assert param.subtype == "n"
+    end
+  end
+
+  describe "symbol/1 dispatch edge cases" do
+    alias Jsonata.Sequence
+
+    test "native Elixir function maps to 'f' (line 174)" do
+      # A raw Elixir fn (not a %Function{} struct) must also map to type "f"
+      sig = Signature.parse("<f>")
+      native_fn = fn -> :ok end
+      assert Signature.validate(sig, [native_fn], nil, "test") == [native_fn]
+    end
+
+    test "Sequence argument maps to 'a' (line 180)" do
+      sig = Signature.parse("<a>")
+      seq = Sequence.from_value([1, 2, 3])
+      assert Signature.validate(sig, [seq], nil, "test") == [seq]
+    end
+
+    test "empty Sequence argument maps to 'm' / undefined (line 180 empty branch)" do
+      # An empty Sequence is treated as undefined (missing) by the symbol dispatch
+      sig = Signature.parse("<a?>")
+      empty_seq = Sequence.empty()
+      # Empty sequence → "m" (missing) — matches "a?" → :undefined
+      result = Signature.validate(sig, [empty_seq], nil, "test")
+      assert result == [:undefined]
+    end
+
+    test "exotic atom (not nil/:undefined) maps to 'm' via catch-all (line 183)" do
+      # A plain atom that isn't nil or :undefined hits the symbol/1 catch-all
+      sig = Signature.parse("<n?>")
+      # :some_atom → "m" (missing), matches "n?" optional
+      result = Signature.validate(sig, [:some_atom], nil, "test")
+      assert result == [:some_atom]
+    end
+  end
 end

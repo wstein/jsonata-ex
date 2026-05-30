@@ -64,5 +64,51 @@ defmodule Jsonata.DateTimeTest do
     test "$fromMillis formats with a picture (see DateTimePictureTest for breadth)" do
       assert {:ok, "1970"} = Jsonata.evaluate(~s|$fromMillis(0, "[Y]")|, :undefined)
     end
+
+    test "$fromMillis with undefined picture delegates to ISO default" do
+      # Exercises from_millis([millis, :undefined]) — picture arg missing at runtime
+      assert eval("$fromMillis(1521554580000, missing)") == "2018-03-20T14:03:00.000Z"
+    end
+
+    test "$fromMillis with both picture and timezone undefined delegates to ISO default" do
+      # Exercises from_millis([millis, :undefined, :undefined])
+      assert eval("$fromMillis(1521554580000, missing, missing)") == "2018-03-20T14:03:00.000Z"
+    end
+  end
+
+  describe "$now with picture" do
+    test "$now([picture]) returns a formatted string matching the picture" do
+      # Exercises now([picture]) → now([picture, :undefined])
+      result = eval("$now(\"[Y]\")")
+      assert is_binary(result)
+      assert String.length(result) == 4
+    end
+
+    test "$now([picture, timezone]) returns a formatted string" do
+      # Exercises now([picture, timezone])
+      result = eval("$now(\"[Y]\", \"+0000\")")
+      assert is_binary(result)
+      assert String.length(result) == 4
+    end
+  end
+
+  describe "$toMillis with fractional seconds and timezone offsets" do
+    test "parses fractional seconds" do
+      # Exercises frac_millis("." <> digits)
+      assert eval(~s|$toMillis("1970-01-01T00:00:00.123Z")|) == 123
+      assert eval(~s|$toMillis("1970-01-01T00:00:00.1Z")|) == 100
+    end
+
+    test "parses timezone with colon separator" do
+      # Exercises timezone_offset_millis with [hh, mm] split ("+05:30")
+      assert eval(~s|$toMillis("1970-01-01T05:30:00+05:30")|) == 0
+      assert eval(~s|$toMillis("1970-01-01T00:00:00-05:00")|) == 18_000_000
+    end
+
+    test "parses timezone without colon separator" do
+      # Exercises timezone_offset_millis with [hhmm] (no colon) split
+      assert eval(~s|$toMillis("1970-01-01T05:30:00+0530")|) == 0
+      assert eval(~s|$toMillis("1970-01-01T00:00:00-0500")|) == 18_000_000
+    end
   end
 end

@@ -62,4 +62,21 @@ defmodule Jsonata.ObjectTest do
       assert Object.to_plain(object) == %{"a" => %{"b" => 1}, "c" => [%{"d" => 2}]}
     end
   end
+
+  describe "has_key?/2 plain map overload" do
+    test "works on a plain Elixir map" do
+      assert Object.has_key?(%{"a" => 1}, "a")
+      refute Object.has_key?(%{"a" => 1}, "b")
+    end
+  end
+
+  describe "from_json/1 error paths" do
+    test "returns error for JSON with trailing content" do
+      assert {:error, {:trailing, _}} = Object.from_json(~s({"a":1} trailing))
+    end
+
+    test "returns error for invalid JSON" do
+      assert {:error, _} = Object.from_json("not json {{")
+    end
+  end
 end
